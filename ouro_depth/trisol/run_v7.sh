@@ -37,14 +37,15 @@ print('probe regenerated with identical hash')
 PY
 fi
 python -c "import torch, transformers, sys; print('torch', torch.__version__, 'transformers', transformers.__version__, 'cuda', torch.cuda.is_available(), 'python', sys.version)"
-python - <<'EOF' || pip install --no-cache-dir "transformers==4.56.2" "numpy<3" "safetensors>=0.4" pytest 2>&1 | tail -2
+WHEELS=$(dirname "$(find /trisol/input/datasets -name 'transformers-4.56.2*.whl' | head -1)")
+python - <<'EOF' || pip install --no-index --find-links "$WHEELS" --no-deps transformers==4.56.2 huggingface_hub==0.34.4 tokenizers==0.21.4 2>&1 | tail -3
 import transformers
 v = tuple(int(x) for x in transformers.__version__.split('.')[:2])
 assert (4, 55) <= v < (5, 0), transformers.__version__
 EOF
 python -c "import transformers; print('transformers now', transformers.__version__)"
-python -m pip install -q pytest 2>/dev/null || true
-python -m pytest ouro_depth/tests/test_train_v7.py -q 2>&1 | tail -3
+python -c "import pytest" 2>/dev/null || echo "pytest unavailable; skipping CPU tests"
+python -c "import pytest" 2>/dev/null && python -m pytest ouro_depth/tests/test_train_v7.py -q 2>&1 | tail -3
 ls "$MODEL"
 python -m ouro_depth.prepare_v7_data --output-dir data/v7-pointer --verify-only | tail -c 300; echo
 python -m ouro_depth.train_v7 prepare --model-path "$MODEL" --data-dir data/v7-pointer --output "$OUT/plan" --seed "$SEED" --batch-size 16 --micro-batch 8 --max-length 768
