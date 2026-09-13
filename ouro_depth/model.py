@@ -116,6 +116,7 @@ class OuroDepthModel(nn.Module):
         attention_mask: Tensor,
         depths: list[int],
         backprop_loops: int | None = None,
+        return_hidden: bool = False,
     ) -> dict[int, Tensor]:
         if not depths or any(type(depth) is not int or depth < 1 for depth in depths):
             raise ValueError("depths must contain positive integers")
@@ -169,7 +170,8 @@ class OuroDepthModel(nn.Module):
                 hidden = body.norm(hidden)
             depth = current_loop + 1
             if depth in requested:
-                outputs[depth] = self.base.lm_head(hidden[batch_indices, last_indices])
+                final = hidden[batch_indices, last_indices]
+                outputs[depth] = final if return_hidden else self.base.lm_head(final)
         return outputs
 
     @staticmethod
