@@ -14,6 +14,7 @@ import random
 
 PROTOCOL = 'ouro_depth_step_supervision_v6'
 ARMS = ('step', 'step_nohold', 'terminal', 'fixed8')
+FAMILIES = ('pointer_node', 'arith_value')
 TASK_DEPTHS = (1, 2, 3, 4, 6, 8)
 # (updates, allowed difficulties); each stage is a multiple of its difficulty count.
 STAGES = ((216, (1, 2)), (360, (1, 2, 3, 4)), (440, (1, 2, 3, 4, 6)), (432, (1, 2, 3, 4, 6, 8)))
@@ -55,9 +56,9 @@ def build_plan(rows, *, seed=20260918, batch_size=16, padding_width, num_layers=
             raise ValueError(f'Invalid integer {name}')
     metadata, pools, identifiers = [], {d: [] for d in TASK_DEPTHS}, set()
     for index, row in enumerate(rows):
-        if (not isinstance(row, dict) or row.get('family') != 'pointer_node' or type(row.get('difficulty')) is not int
+        if (not isinstance(row, dict) or row.get('family') not in FAMILIES or type(row.get('difficulty')) is not int
                 or row['difficulty'] not in pools or not isinstance(row.get('id'), str) or row['id'] in identifiers):
-            raise ValueError('Only pointer_node d1/2/3/4/6/8 rows with unique IDs are allowed')
+            raise ValueError('Only pointer_node/arith_value d1/2/3/4/6/8 rows with unique IDs are allowed')
         identifiers.add(row['id'])
         pools[row['difficulty']].append(index)
         metadata.append({'id': row['id'], 'family': row['family'], 'difficulty': row['difficulty']})

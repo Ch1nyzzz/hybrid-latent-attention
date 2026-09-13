@@ -12,6 +12,30 @@ mkdir -p "$WORK" "$OUT"
 BUNDLE=$(find "$DS" -name 'loop-scale-v7*.tar.gz' | head -1)
 echo "bundle: $BUNDLE"; tar xzf "$BUNDLE" -C "$WORK"
 cd "$WORK"
+export PYTHONPATH="$WORK"
+# Data is regenerated deterministically in-job (code-only bundle); the shipped manifests pin the expected bytes.
+if [ ! -f data/v7-pointer/train.jsonl ]; then
+  mkdir -p data && mv data/v7-pointer data/v7-pointer.manifest-only 2>/dev/null || true
+  python -m ouro_depth.prepare_v7_data --root "$WORK" --output-dir data/v7-pointer --seed 20260919 | tail -c 200; echo
+  python - <<'PY'
+import json
+want = json.load(open('data/v7-pointer.manifest-only/manifest.json'))['split_sha256']
+got = json.load(open('data/v7-pointer/manifest.json'))['split_sha256']
+assert want == got, (want, got)
+print('v7 corpus regenerated with identical split hashes')
+PY
+fi
+if [ ! -f data/v5-probe-d13-16/dev.jsonl ]; then
+  mv data/v5-probe-d13-16 data/v5-probe.manifest-only 2>/dev/null || true
+  python -m ouro_depth.prepare_v5_probe --output-dir data/v5-probe-d13-16 --seed 20260917 | tail -c 100; echo
+  python - <<'PY'
+import hashlib
+want = open('data/v5-probe.manifest-only/dev.sha256').read().strip()
+got = hashlib.sha256(open('data/v5-probe-d13-16/dev.jsonl','rb').read()).hexdigest()
+assert want == got, (want, got)
+print('probe regenerated with identical hash')
+PY
+fi
 python -c "import torch, transformers, sys; print('torch', torch.__version__, 'transformers', transformers.__version__, 'cuda', torch.cuda.is_available(), 'python', sys.version)"
 python - <<'EOF' || pip install --no-cache-dir "transformers==4.56.2" "numpy<3" "safetensors>=0.4" pytest 2>&1 | tail -2
 import transformers
@@ -20,7 +44,6 @@ assert (4, 55) <= v < (5, 0), transformers.__version__
 EOF
 python -c "import transformers; print('transformers now', transformers.__version__)"
 python -m pip install -q pytest 2>/dev/null || true
-export PYTHONPATH="$WORK"
 python -m pytest ouro_depth/tests/test_train_v7.py -q 2>&1 | tail -3
 ls "$MODEL"
 python -m ouro_depth.prepare_v7_data --output-dir data/v7-pointer --verify-only | tail -c 300; echo

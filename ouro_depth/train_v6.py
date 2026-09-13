@@ -44,7 +44,7 @@ def encode_rows(rows, tokenizer, token_ids, max_length):
         ids = tokenizer.encode(row['prompt'], add_special_tokens=False)
         path = row['metadata']['path']
         hops = [token_ids[node] for node in path]
-        joint = tokenizer.encode(row['prompt'] + ' ' + row['answer'], add_special_tokens=False)
+        joint = tokenizer.encode(row['prompt'] + row['metadata'].get('answer_prefix', ' ') + row['answer'], add_special_tokens=False)
         if joint != ids + [hops[-1]] or len(ids) > max_length or len(hops) != row['difficulty'] + 1:
             raise ValueError(f'Tokenization boundary or path mismatch: {row["id"]}')
         result.append({'row': row, 'ids': ids, 'target': hops[-1], 'hops': hops})
@@ -157,12 +157,20 @@ def evaluate(model, encoded, args, depths, output_prefix, token_to_label):
         nll = {d: F.cross_entropy(l.float(), targets, reduction='none').cpu().tolist() for d, l in logits.items()}
         for j, item in enumerate(items):
             row = item['row']
-            edges, start_node = row['metadata']['facts']['edges'], row['metadata']['query']['start']
+            meta = row['metadata']
             scores = {}
             for d in depths:
                 token = predictions[d][j]
                 label = token_to_label.get(token)
-                landed = _cycle_distance(edges, start_node, label) if label else None
+                if label is None:
+                    landed = None
+                elif row['family'] == 'pointer_node':
+                    landed = _cycle_distance(meta['facts']['edges'], meta['query']['start'], label)
+                else:
+                    # Values repeat modulo 7: report the matching step closest to the exit's expected step.
+                    expected = min(d, row['difficulty'])
+                    hits = [i for i, v in enumerate(meta['path']) if v == label]
+                    landed = min(hits, key=lambda i: (abs(i - expected), i)) if hits else None
                 scores[str(d)] = {'correct': token == item['target'], 'prediction_token': token, 'nll': nll[d][j],
                                   'landed_hop': landed}
             records.append({'id': row['id'], 'family': row['family'], 'difficulty': row['difficulty'],
