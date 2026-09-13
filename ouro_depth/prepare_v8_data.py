@@ -1,7 +1,9 @@
 """V8 corpus: modular-arithmetic chains whose per-step VALUES are the loop targets.
 
-A chain of affine equations modulo 7 (single-digit values, one token each
-after "Answer:"). The query variable sits d steps from the base; metadata.path
+A chain of additive equations modulo 7 (`b = (a + 3) mod 7`; single-digit
+values, one token each after "Answer:"). The affine form `(m * a + b) mod 7`
+was not learnable by the base model at one step within the V6 budget
+(d1 stayed at chance), so each step is a single addition-table lookup. The query variable sits d steps from the base; metadata.path
 holds the value after every step so exit r can be supervised with the value
 after min(r, d) operations — the arithmetic analogue of V6's node-per-hop.
 Equations are shuffled; 25 equations per prompt (one chain, irrelevant tail).
@@ -19,7 +21,7 @@ from .data import LABELS, _key
 from .prepare_diagnostics import _write_json, _write_rows
 
 FAMILY = 'arith_value'
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MODULUS = 7
 TRAIN_DEPTHS = (1, 2, 3, 4, 6, 8)
 EVAL_DEPTHS = TRAIN_DEPTHS + (9, 10, 11, 12)
@@ -34,10 +36,10 @@ def make_instance(rng, hops, chain):
     values = [rng.randrange(MODULUS)]
     equations = []
     for i in range(1, chain + 1):
-        multiplier, bias = rng.randrange(2, MODULUS), rng.randrange(MODULUS)
-        equations.append([variables[i], multiplier, variables[i - 1], bias])
-        values.append((multiplier * values[-1] + bias) % MODULUS)
-    statements = [f'{variables[0]} = {values[0]}'] + [f'{dst} = ({m} * {src} + {b}) mod {MODULUS}' for dst, m, src, b in equations]
+        bias = rng.randrange(1, MODULUS)
+        equations.append([variables[i], variables[i - 1], bias])
+        values.append((values[-1] + bias) % MODULUS)
+    statements = [f'{variables[0]} = {values[0]}'] + [f'{dst} = ({src} + {b}) mod {MODULUS}' for dst, src, b in equations]
     rng.shuffle(statements)
     query = variables[hops]
     prompt = (f'All values are integers modulo {MODULUS}. Each equation defines its left-hand variable.\nEquations:\n'
@@ -57,18 +59,18 @@ def solve_prompt(prompt):
     bases, definitions = {}, {}
     for line in match[1].splitlines():
         base = re.fullmatch(r'([a-z]{2}) = ([0-6])', line)
-        expr = re.fullmatch(r'([a-z]{2}) = \(([2-6]) \* ([a-z]{2}) \+ ([0-6])\) mod 7', line)
+        expr = re.fullmatch(r'([a-z]{2}) = \(([a-z]{2}) \+ ([1-6])\) mod 7', line)
         if base:
             bases[base[1]] = int(base[2])
         elif expr:
-            definitions[expr[1]] = (int(expr[2]), expr[3], int(expr[4]))
+            definitions[expr[1]] = (expr[2], int(expr[3]))
         else:
             raise ValueError('Unrecognized statement')
     if len(bases) != 1 or set(bases) & set(definitions):
         raise ValueError('Exactly one base is required')
     (start, value), = bases.items()
     order, current = [start], start
-    successors = {src: dst for dst, (_, src, _) in definitions.items()}
+    successors = {src: dst for dst, (src, _) in definitions.items()}
     if len(successors) != len(definitions):
         raise ValueError('Chain is not linear')
     while current in successors:
@@ -78,15 +80,15 @@ def solve_prompt(prompt):
         raise ValueError('Equations do not form one chain from the base')
     values, trace = {start: value}, [str(value)]
     for var in order[1:]:
-        m, src, b = definitions[var]
-        values[var] = (m * values[src] + b) % MODULUS
+        src, b = definitions[var]
+        values[var] = (values[src] + b) % MODULUS
     query = match[2]
     if query not in values or query == start:
         raise ValueError('Query must be a defined non-base variable')
     steps = order.index(query)
     path = [str(values[v]) for v in order[:steps + 1]]
     return {'path': path, 'steps': steps, 'chain': len(definitions),
-            'facts': {'base': [start, value], 'equations': sorted([dst, m, src, b] for dst, (m, src, b) in definitions.items()),
+            'facts': {'base': [start, value], 'equations': sorted([dst, src, b] for dst, (src, b) in definitions.items()),
                       'modulus': MODULUS}}
 
 
@@ -139,7 +141,7 @@ def prepare(output_dir, seed=20260921, train_per_depth=4000, dev_per_depth=128, 
         digests[split] = hashlib.sha256((output / f'{split}.jsonl').read_bytes()).hexdigest()
         counts[split] = {str(k): v for k, v in sorted(Counter(r['difficulty'] for r in rows).items())}
         answers[split] = {str(k): v for k, v in sorted(Counter(r['answer'] for r in rows).items())}
-    manifest = {'dataset_type': 'arith_value_v8', 'seed': seed, 'family': FAMILY, 'schema_version': SCHEMA_VERSION,
+    manifest = {'dataset_type': 'arith_value_v8_additive', 'seed': seed, 'family': FAMILY, 'schema_version': SCHEMA_VERSION,
                 'modulus': MODULUS, 'chain_length': {'train': CHAIN, 'dev': CHAIN, 'test': CHAIN, 'probe': PROBE_CHAIN},
                 'counts_per_difficulty': counts, 'answer_counts': answers, 'split_sha256': digests, 'sealed_splits': ['test'],
                 'model_scoring_performed': False,

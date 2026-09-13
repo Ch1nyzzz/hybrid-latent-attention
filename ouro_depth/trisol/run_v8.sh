@@ -19,7 +19,7 @@ v = tuple(int(x) for x in transformers.__version__.split('.')[:2])
 assert (4, 55) <= v < (5, 0), transformers.__version__
 PY
 python -c "import torch, transformers; print('torch', torch.__version__, 'transformers', transformers.__version__, 'cuda', torch.cuda.is_available())"
-python -m ouro_depth.prepare_v8_data --output-dir data/v8-arith --seed 20260921 | tail -c 400; echo
+python -m ouro_depth.prepare_v8_data --output-dir data/v8-arith --seed 20260923 | tail -c 400; echo
 python - <<'PY'
 import json
 got = json.load(open('data/v8-arith/manifest.json'))['split_sha256']
