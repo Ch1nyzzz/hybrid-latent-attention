@@ -279,8 +279,10 @@ def _train(model, tokenizer, args, output, token_ids):
         if Path(str(prefix) + '.json').exists():
             return json.loads(Path(str(prefix) + '.json').read_text())
         summary = evaluate(model, dev, args, list(EVAL_DEPTHS), prefix, token_to_label)
-        log(output / 'metrics.jsonl', {'event': 'dev', 'update': update, 'compute_units': state['compute_units'],
-                                       'metrics': {k: {t: round(v['accuracy'], 4) for t, v in g.items()} for k, g in summary['metrics'].items()}})
+        compact = {k: {t: round(v['accuracy'], 4) for t, v in g.items()} for k, g in summary['metrics'].items()}
+        log(output / 'metrics.jsonl', {'event': 'dev', 'update': update, 'compute_units': state['compute_units'], 'metrics': compact})
+        diagonal = {k: compact[k].get(k[1:]) for k in compact if k.startswith('d') and k[1:] in compact[k]}
+        print(json.dumps({'V6_DEV': {'arm': args.arm, 'update': update, 'diagonal_T_equals_d': diagonal, 'accuracy': compact}}), flush=True)
         return summary
 
     if saved and state['update'] in plan['endpoints']:
