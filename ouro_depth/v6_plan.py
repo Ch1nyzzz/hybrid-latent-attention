@@ -13,7 +13,7 @@ import math
 import random
 
 PROTOCOL = 'ouro_depth_step_supervision_v6'
-ARMS = ('step', 'step_nohold', 'terminal', 'fixed8', 'step_count')
+ARMS = ('step', 'step_nohold', 'terminal', 'fixed8', 'step_count', 'step_done')
 FAMILIES = ('pointer_node', 'arith_value')
 TASK_DEPTHS = (1, 2, 3, 4, 6, 8)
 # (updates, allowed difficulties); each stage is a multiple of its difficulty count.
@@ -29,7 +29,9 @@ SUPERVISION = {'step': 'exits 1..T, target = node after min(exit, hops) links',
                'terminal': 'exit T only, target = node after hops links',
                'fixed8': 'T = 8 for every batch, exit 8 only, target = node after hops links',
                'step_count': 'node targets as step_nohold PLUS an auxiliary countdown head at every exit 1..T '
-                             'predicting max(hops - exit, 0); stop = first exit whose predicted countdown is 0'}
+                             'predicting max(hops - exit, 0); stop = first exit whose predicted countdown is 0',
+               'step_done': 'node targets as step_nohold PLUS a binary done head at every exit 1..T '
+                            '(0 = reached the goal, i.e. exit >= hops; 1 = not yet); stop = first exit reading 0'}
 COUNT_CLASSES = 17
 
 
@@ -48,7 +50,7 @@ def supervised_exits(arm, depth, hops):
     """Return {exit: hop index whose node is the target} for one batch."""
     if arm == 'step':
         return {r: min(r, hops) for r in range(1, depth + 1)}
-    if arm in ('step_nohold', 'step_count'):
+    if arm in ('step_nohold', 'step_count', 'step_done'):
         return {r: r for r in range(1, hops + 1)}
     return {depth: hops}
 
@@ -99,7 +101,8 @@ def build_plan(rows, *, seed=20260918, batch_size=16, padding_width, num_layers=
             used += work
             records.append({**copy.deepcopy(record), 'update': index + 1, 'depth': depth,
                             'targets': {str(r): h for r, h in supervised_exits(arm, depth, record['difficulty']).items()},
-                            'count_targets': {str(r): max(record['difficulty'] - r, 0) for r in range(1, depth + 1)} if arm == 'step_count' else {},
+                            'count_targets': ({str(r): max(record['difficulty'] - r, 0) for r in range(1, depth + 1)} if arm == 'step_count'
+                                              else {str(r): int(r < record['difficulty']) for r in range(1, depth + 1)} if arm == 'step_done' else {}),
                             'lr': lr_at(index + 1, UPDATES), 'compute_units': work, 'cumulative_compute': used})
         arms[arm], budget[arm] = records, used
     endpoints = sorted({int(round(UPDATES * f)) for f in ENDPOINT_FRACTIONS})

@@ -89,8 +89,8 @@ def _validate_config(model, args):
         expected |= {id(p) for p in head.parameters()}
     if {id(p) for p in params if p.requires_grad} != expected:
         raise ValueError('Complete shared decoder/norm (plus the optional countdown head) only must be trainable')
-    if (args.arm == 'step_count') != (head is not None):
-        raise ValueError('step_count requires the countdown head and other arms must not have it')
+    if (args.arm in ('step_count', 'step_done')) != (head is not None):
+        raise ValueError('step_count/step_done require the auxiliary head and other arms must not have it')
     if device.type == 'cuda':
         body = model.trainable_count - (sum(p.numel() for p in head.parameters()) if head is not None else 0)
         actual = {'seed': args.seed, 'batch_size': args.batch_size, 'micro_batch': args.micro_batch,
@@ -133,8 +133,12 @@ def train_update(model, optimizer, items, record, args, plan):
             losses = {r: F.cross_entropy(model.base.lm_head(hidden[r]).float(), hop_targets[:, j]) for j, r in enumerate(exits)}
             loss = sum(losses.values()) / len(exits)
             if counts:
-                count_targets = torch.tensor([[min(max(item['row']['difficulty'] - r, 0), COUNT_CLASSES - 1) for r in sorted(counts)]
-                                              for item in micro], dtype=torch.long, device=args.device)
+                if args.arm == 'step_done':
+                    count_targets = torch.tensor([[int(r < item['row']['difficulty']) for r in sorted(counts)] for item in micro],
+                                                 dtype=torch.long, device=args.device)
+                else:
+                    count_targets = torch.tensor([[min(max(item['row']['difficulty'] - r, 0), COUNT_CLASSES - 1) for r in sorted(counts)]
+                                                  for item in micro], dtype=torch.long, device=args.device)
                 count_loss = sum(F.cross_entropy(model.count_head(hidden[r].float()), count_targets[:, j])
                                  for j, r in enumerate(sorted(counts))) / len(counts)
                 loss = loss + count_loss
@@ -407,7 +411,7 @@ def main():
     if args.command == 'train':
         if not args.plan_path:
             parser.error('train requires --plan-path')
-        if args.arm == 'step_count':
+        if args.arm in ('step_count', 'step_done'):
             attach_count_head(model)
         train(model, tokenizer, args, token_ids)
     else:

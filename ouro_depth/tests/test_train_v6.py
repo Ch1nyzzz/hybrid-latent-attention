@@ -135,6 +135,8 @@ class V6CountdownCPU(unittest.TestCase):
             plan, _, _ = t.prepare_plan(NodeTokenizer(), args, 1, token_ids)
             self.assertEqual(sorted(map(int, plan['arms']['step_count'][0]['count_targets'])), list(range(1, plan['arms']['step_count'][0]['depth'] + 1)))
             self.assertEqual(plan['arms']['step_nohold'][0]['count_targets'], {})
+            done = plan['arms']['step_done'][0]
+            self.assertEqual(done['count_targets'], {str(r): int(r < done['difficulty']) for r in range(1, done['depth'] + 1)})
             (root / 'plan.json').write_text(json.dumps(plan))
             args.plan_path = str(root / 'plan.json')
             result = t.train(model, NodeTokenizer(), args, token_ids)
