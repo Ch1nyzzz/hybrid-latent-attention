@@ -1,0 +1,162 @@
+{
+  "observed_utc": "2026-09-13T15:26:20.317505+00:00",
+  "scope": "final shared adaptation failure; not a depth-training experiment",
+  "run": "/data/erv1n/ouro-depth-20260913/runs/huginn-shared-adaptation-s19872",
+  "pid_exists": false,
+  "status": "completed",
+  "completed_updates": 256,
+  "incremental_runtime_checks": {
+    "from": 129,
+    "through": 256,
+    "passed": true,
+    "prior_1_to_128_receipts_reused": true
+  },
+  "checkpoint_complete_marker": {
+    "files": [
+      "model.pt",
+      "training.pt",
+      "identity.json"
+    ],
+    "format_version": 1,
+    "update": 256
+  },
+  "checkpoint_file_sizes": {
+    "model.pt": 14261504063,
+    "training.pt": 28519931446,
+    "identity.json": 46060
+  },
+  "full_checkpoint_reload_tested": false,
+  "readiness": {
+    "ready": false,
+    "raw_accuracy": {
+      "1": {
+        "32": 0.125,
+        "64": 0.125
+      },
+      "2": {
+        "32": 0.125,
+        "64": 0.125
+      }
+    },
+    "thresholds": {
+      "d1": 0.95,
+      "d2": 0.8,
+      "both_depths_required": true
+    },
+    "scope": "common simple-task initialization only; not deeper-training or hard-task success"
+  },
+  "raw_prediction_token_histograms": {
+    "32": {
+      "445": 256
+    },
+    "64": {
+      "445": 256
+    }
+  },
+  "final_metrics": {
+    "all": {
+      "32": {
+        "n": 256,
+        "accuracy": 0.125,
+        "choice_accuracy": 0.125,
+        "nll": 2.0945351258851588,
+        "choice_nll": 2.0928212464787066,
+        "answer_mass": 0.998287990456447,
+        "choice_tie_rate": 0.0,
+        "choice_tie_aware_accuracy": 0.125
+      },
+      "64": {
+        "n": 256,
+        "accuracy": 0.125,
+        "choice_accuracy": 0.125,
+        "nll": 2.092972320970148,
+        "choice_nll": 2.091258306056261,
+        "answer_mass": 0.9982878402806818,
+        "choice_tie_rate": 0.0,
+        "choice_tie_aware_accuracy": 0.125
+      }
+    },
+    "pointer_chasing/d1": {
+      "32": {
+        "n": 128,
+        "accuracy": 0.125,
+        "choice_accuracy": 0.125,
+        "nll": 2.094315110705793,
+        "choice_nll": 2.0926010021939874,
+        "answer_mass": 0.9982877811416984,
+        "choice_tie_rate": 0.0,
+        "choice_tie_aware_accuracy": 0.125
+      },
+      "64": {
+        "n": 128,
+        "accuracy": 0.125,
+        "choice_accuracy": 0.125,
+        "nll": 2.093369801528752,
+        "choice_nll": 2.0916549367830157,
+        "answer_mass": 0.9982868880033493,
+        "choice_tie_rate": 0.0,
+        "choice_tie_aware_accuracy": 0.125
+      }
+    },
+    "pointer_chasing/d2": {
+      "32": {
+        "n": 128,
+        "accuracy": 0.125,
+        "choice_accuracy": 0.125,
+        "nll": 2.0947551410645247,
+        "choice_nll": 2.093041490763426,
+        "answer_mass": 0.9982881997711957,
+        "choice_tie_rate": 0.0,
+        "choice_tie_aware_accuracy": 0.125
+      },
+      "64": {
+        "n": 128,
+        "accuracy": 0.125,
+        "choice_accuracy": 0.125,
+        "nll": 2.092574840411544,
+        "choice_nll": 2.0908616753295064,
+        "answer_mass": 0.9982887925580144,
+        "choice_tie_rate": 0.0,
+        "choice_tie_aware_accuracy": 0.125
+      }
+    }
+  },
+  "endpoint_binding_reused": {
+    "all_256_ordered_IDs_and_metadata_match": true,
+    "all_score_derived_metrics_match": true,
+    "test_data_read": false,
+    "raw_prediction_token_checks": 512,
+    "answer_token_ids": {
+      "A": 394,
+      "B": 446,
+      "C": 417,
+      "D": 533,
+      "E": 513,
+      "F": 445,
+      "G": 590,
+      "H": 482
+    },
+    "raw_correctness_matches_answer_tokens": true
+  },
+  "final_state": {
+    "format_version": 1,
+    "phase": "ready",
+    "identity_sha256": "545d1c7b84988a302daf4307d5de3012a4e2126a3d727a81132eaf0adb7005ed",
+    "cursor": 256,
+    "update": 256,
+    "examples": 4096,
+    "valid_tokens": 801509,
+    "padded_tokens": 1048576,
+    "forward_token_rounds": 33554432,
+    "gradient_token_rounds": 8388608,
+    "depth_histogram": {
+      "32": 4096
+    }
+  },
+  "last_loss": 2.11774742603302,
+  "training_update_seconds": 1648.5765155535191,
+  "test_scored": false,
+  "main_training_launched": false,
+  "goal_achieved": false,
+  "next_step": "Diagnose simple-task learning failure before any new depth-training experiment"
+}

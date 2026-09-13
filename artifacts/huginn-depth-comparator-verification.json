@@ -1,0 +1,67 @@
+{
+  "scope": "synthetic_saved_Huginn_predictions_only_no_research_data",
+  "status": "passed",
+  "test_module": "ouro_depth.tests.test_compare_huginn_depth_predictions",
+  "test_count": 5,
+  "failures": 0,
+  "errors": 0,
+  "elapsed_seconds": 2.5872613748069853,
+  "python_version": "3.12.6",
+  "synthetic_dev_rows": 1280,
+  "synthetic_confirmation_rows": 3072,
+  "roles": [
+    "initializer",
+    "fixed32_780",
+    "fixed32_1200",
+    "fixed64_780"
+  ],
+  "depths": [
+    32,
+    48,
+    64
+  ],
+  "scope_checked": [
+    "strong_intermediate_and_exposure_baseline",
+    "frozen_DEV_selection_no_TEST_reselection",
+    "failed_DEV_and_overlapping_ID_rejection",
+    "Holm_contrast_deduplication",
+    "candidate_floors",
+    "hard_shallow_cost_not_gate",
+    "canonical_raw_token_correctness",
+    "summary_ID_metadata_quota_validation"
+  ],
+  "old_statistical_tests_repeated": false,
+  "model_or_gpu_used": false,
+  "research_data_read": false,
+  "research_data_generated": false,
+  "adoption_or_training": false,
+  "runner_output": "test_dev_selects_strong_exposure_and_own48_and_shallow_cost_is_not_a_gate (ouro_depth.tests.test_compare_huginn_depth_predictions.HuginnComparisonTests.test_dev_selects_strong_exposure_and_own48_and_shallow_cost_is_not_a_gate) ... ok\ntest_duplicate_selected_and_same_depth_contrast_is_one_holm_member (ouro_depth.tests.test_compare_huginn_depth_predictions.HuginnComparisonTests.test_duplicate_selected_and_same_depth_contrast_is_one_holm_member) ... ok\ntest_strong_middle_initializer_or_exposure_prevents_weak_baseline_success (ouro_depth.tests.test_compare_huginn_depth_predictions.HuginnComparisonTests.test_strong_middle_initializer_or_exposure_prevents_weak_baseline_success) ... ok\ntest_test_uses_frozen_dev_choices_and_discloses_unselected_stronger_baseline (ouro_depth.tests.test_compare_huginn_depth_predictions.HuginnComparisonTests.test_test_uses_frozen_dev_choices_and_discloses_unselected_stronger_baseline) ... ok\ntest_token_summary_ids_metadata_and_quota_tampering_are_rejected (ouro_depth.tests.test_compare_huginn_depth_predictions.HuginnComparisonTests.test_token_summary_ids_metadata_and_quota_tampering_are_rejected) ... ok\n\n----------------------------------------------------------------------\nRan 5 tests in 2.587s\n\nOK\n",
+  "final_targeted_check": {
+    "reason": "Require complete DEV input identity/digest schema even after rehashing a malformed selection",
+    "test": "ouro_depth.tests.test_compare_huginn_depth_predictions.HuginnComparisonTests.test_test_uses_frozen_dev_choices_and_discloses_unselected_stronger_baseline",
+    "test_count": 1,
+    "failures": 0,
+    "errors": 0,
+    "elapsed_seconds": 1.0386203748639673,
+    "status": "passed",
+    "runner_output": "test_test_uses_frozen_dev_choices_and_discloses_unselected_stronger_baseline (ouro_depth.tests.test_compare_huginn_depth_predictions.HuginnComparisonTests.test_test_uses_frozen_dev_choices_and_discloses_unselected_stronger_baseline) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 1.023s\n\nOK\n"
+  },
+  "strict_discrete_identity_revision": {
+    "reason": "Explicit type/value metadata and canonical JSON selection comparisons; float difficulty with recomputed summary and float selection fields retaining original fingerprint are rejected",
+    "tests": [
+      "ouro_depth.tests.test_compare_huginn_depth_predictions.HuginnComparisonTests.test_test_uses_frozen_dev_choices_and_discloses_unselected_stronger_baseline",
+      "ouro_depth.tests.test_compare_huginn_depth_predictions.HuginnComparisonTests.test_token_summary_ids_metadata_and_quota_tampering_are_rejected"
+    ],
+    "test_count": 2,
+    "failures": 0,
+    "errors": 0,
+    "elapsed_seconds": 1.1288082089740783,
+    "status": "passed",
+    "report_only_changes": [
+      "paired approximate 95% CI column",
+      "DEV post-selection p values explicitly descriptive"
+    ],
+    "runner_output": "test_test_uses_frozen_dev_choices_and_discloses_unselected_stronger_baseline (ouro_depth.tests.test_compare_huginn_depth_predictions.HuginnComparisonTests.test_test_uses_frozen_dev_choices_and_discloses_unselected_stronger_baseline) ... ok\ntest_token_summary_ids_metadata_and_quota_tampering_are_rejected (ouro_depth.tests.test_compare_huginn_depth_predictions.HuginnComparisonTests.test_token_summary_ids_metadata_and_quota_tampering_are_rejected) ... ok\n\n----------------------------------------------------------------------\nRan 2 tests in 1.129s\n\nOK\n",
+    "unchanged_old_statistical_tests_repeated": false
+  }
+}

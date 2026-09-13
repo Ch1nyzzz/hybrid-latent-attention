@@ -1,0 +1,7 @@
+{
+  "repository": "ByteDance/Ouro-1.4B",
+  "revision": "574fa66cb8bf5abdc979642d01cf2b79b16bfab1",
+  "path": "/data/erv1n/ouro-depth-20260913/base_model",
+  "torch": "2.11.0+cu130",
+  "transformers": "4.56.2"
+}

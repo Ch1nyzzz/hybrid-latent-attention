@@ -1,0 +1,1173 @@
+{
+  "updated_utc": "2026-09-13T15:26:20.317505+00:00",
+  "goal": "Train Ouro or Huginn so additional inference loops improve hard-task accuracy",
+  "goal_achieved": false,
+  "phase": "huginn_shared_adaptation_completed_readiness_failed",
+  "host": "reds-lab",
+  "remote_root": "/data/erv1n/ouro-depth-20260913",
+  "model": "tomg-group-umd/huginn-0125",
+  "revision": "bb6621b65e90b6a4b9b29ef88dc83866d450470c",
+  "protocol": "HUGINN-SHARED-ADAPTATION.md",
+  "prior_runs": [
+    {
+      "name": "v1-fixed4-s20260913",
+      "status": "completed",
+      "checkpoint": "/data/erv1n/ouro-depth-20260913/runs/v1-fixed4-s20260913/checkpoint-430",
+      "updates": 430,
+      "compute_units": 1001472000,
+      "final_dev_accuracy": {
+        "4": 0.125,
+        "8": 0.125
+      }
+    },
+    {
+      "name": "v1-curriculum-s20260913",
+      "status": "completed",
+      "checkpoint": "/data/erv1n/ouro-depth-20260913/runs/v1-curriculum-s20260913/checkpoint-311",
+      "updates": 311,
+      "compute_units": 1001889792,
+      "final_dev_accuracy": {
+        "4": 0.125,
+        "8": 0.125
+      }
+    },
+    {
+      "name": "v1-fixed8-s20260913",
+      "status": "completed",
+      "checkpoint": "/data/erv1n/ouro-depth-20260913/runs/v1-fixed8-s20260913/checkpoint-215",
+      "updates": 215,
+      "compute_units": 1000341504,
+      "final_dev_accuracy": {
+        "4": 0.11979166666666667,
+        "8": 0.140625
+      }
+    }
+  ],
+  "active_runs": [],
+  "held_out_test_used": false,
+  "queued": null,
+  "onehop": {
+    "status": "completed",
+    "checkpoint": "/data/erv1n/ouro-depth-20260913/diagnostics/diagnostic-onehop-s20260913/checkpoint-416",
+    "updates": 416,
+    "compute_units": 500539392,
+    "heldout_dev": {
+      "count": 512,
+      "loop4_accuracy": 1.0,
+      "loop8_accuracy": 1.0
+    },
+    "v2_fresh_dev_baseline": "../artifacts/v2-initializer-dev.json"
+  },
+  "verification": [
+    "All29888 v2 rows independently solved after transfer; no overlap with26912 prior instances",
+    "8 sampler tests passed locally",
+    "4 trainer/evaluator tests passed in pinned remote CPU runtime; exact resumed model/Adam/sampler/RNG/counters",
+    "One independent curriculum/state/launcher review; no blocking findings",
+    "Real1.4B training updates verified on actual GPU4/5, with loop4/6/8 observed",
+    "Unchanged model equivalence/smoke evidence reused; no duplicate full model tests or source hashes",
+    "V3:11 pure-plan tests plus3 pinned tiny-model/padding/resume tests and1 zero-gradient regression passed; actual shared plan cross-checked once",
+    "V3 comparator:8 synthetic tests passed;48 actual DEV comparisons matched240 saved trainer statistics",
+    "V3 confirmation:9 controller tests,6 evaluation-binding tests plus1 digest increment passed; both focused review findings fixed and rechecked",
+    "Actual v3T8 update508 verified in both arms with finite nonzero gradients; peak allocated memory approximately26.1GB",
+    "DEV600: two actual1280-row prediction files fully bound to data/summary; conditional graph-node audit independently solved1280rows; no model rerun",
+    "DEV800: actual two1280-row files bound to originalDEV and all summary metrics; logged new plan prefixes and finite gradients checked; no model rerun",
+    "Both final DEV1280 bound to data/summary/completion receipt; final1059 plan/counters and nonempty model/Adam files inspected remotely; fixed4 actual GPU5 PID and first27 finite updates verified"
+  ],
+  "remaining": [
+    "Diagnose Huginn simple-task learning failure using existing evidence and a separately declared small fit diagnostic",
+    "Do not launch the conditional F32/F64 main experiment from this unqualified initializer",
+    "Establish verified extra-loop hard-task benefit; original objective remains unachieved"
+  ],
+  "reports": [
+    "FINDINGS-20260913.md",
+    "FINDINGS-v2.md",
+    "DEVELOPMENT_REPORT.md",
+    "DEVELOPMENT_REPORT-v2.md",
+    "CONFIRMATION.md",
+    "FINDINGS-v3.md",
+    "PROTOCOL-v3.md",
+    "V3-DATA.md",
+    "CONFIRMATION-v3.md",
+    "STABILITY-NOTES.md",
+    "PROTOCOL-v4.md",
+    "FINDINGS-v4.md",
+    "CONFIRMATION-v4.md",
+    "FINDINGS-huginn.md"
+  ],
+  "development_findings": [
+    "Final curriculum hard4-to8:88.67% to92.58%,20wrong-to-right/10right-to-wrong; approximate95%CI includes0",
+    "Final fixed4-trained T4 hard96.88% exceeds curriculumT8 92.58%; original sealed confirmation criterion not met",
+    "Both final d1T4=100%; curriculum is substantially more stable across loops",
+    "Final curriculum d8 gains79.69% to90.63%; most corrected wrong options lie beyond the target node, not before it"
+  ],
+  "confirmation_tooling": {
+    "status": "not_executed_final_dev_cross_training_point_gain_negative",
+    "new_tests_passed": 16,
+    "scope": [
+      "strictsavedpredictionpairing",
+      "syntheticfinalcandidateanddispatchsafeguards"
+    ],
+    "review": "onefocusedreview;fourfindingsfixed",
+    "actual_trainer_statistics_interop": "matchedfor4IIDgroupsand2correctnessfields",
+    "runner": "confirm_v2.py",
+    "guide": "CONFIRMATION.md",
+    "preparation_requires_final_budget": true
+  },
+  "additional_development_probe": {
+    "data": "../data/extrapolation-dev",
+    "rows": 512,
+    "hops": [
+      9,
+      10,
+      11,
+      12
+    ],
+    "depths": [
+      4,
+      6,
+      8,
+      12,
+      16
+    ],
+    "status": "completed_all_three_models",
+    "execution_after": "both_v2_final_2B_checkpoints_complete",
+    "protocol": "EXTRAPOLATION_PROBE.md",
+    "replaces_v2_primary": false,
+    "remote_output": "/data/erv1n/ouro-depth-20260913/diagnostics/v2-extrapolation-dev",
+    "pids": {},
+    "pooled_accuracy": {
+      "initializer": {
+        "4": 0.08984375,
+        "6": 0.078125,
+        "8": 0.080078125,
+        "12": 0.08203125,
+        "16": 0.0859375
+      },
+      "fixed": {
+        "4": 0.15625,
+        "6": 0.533203125,
+        "8": 0.294921875,
+        "12": 0.119140625,
+        "16": 0.099609375
+      },
+      "curriculum": {
+        "4": 0.166015625,
+        "6": 0.13671875,
+        "8": 0.1328125,
+        "12": 0.125,
+        "16": 0.095703125
+      }
+    }
+  },
+  "progress_plot": "../artifacts/extension-progress.png",
+  "v2_final_runs": [
+    {
+      "name": "v2-fixed4-s20260913",
+      "status": "completed",
+      "checkpoint": "/data/erv1n/ouro-depth-20260913/runs/v2-fixed4-s20260913/checkpoint-1664",
+      "updates": 1664,
+      "compute_units": 2001125376,
+      "examples": 26624,
+      "termination": "budget"
+    },
+    {
+      "name": "v2-depthcurriculum-s20260913",
+      "status": "completed",
+      "checkpoint": "/data/erv1n/ouro-depth-20260913/runs/v2-depthcurriculum-s20260913/checkpoint-1105",
+      "updates": 1105,
+      "compute_units": 2001051648,
+      "examples": 17680,
+      "termination": "budget"
+    }
+  ],
+  "v3": {
+    "status": "all_training_and_registered_DEV_probe_completed_gate_failed",
+    "protocol": "PROTOCOL-v3.md",
+    "data": "../data/v3-pointer",
+    "train_seed": 20260914,
+    "data_seed": 17601,
+    "arms": [
+      "conditional",
+      "independent",
+      "fixed4"
+    ],
+    "budget_per_arm": 2000000000,
+    "real_training_launched": true,
+    "adoption_basis": "Finalfixed4 9-12hopDEV4-to8 gain13.87pp; two-model-adjustedapproxCI[5.03,22.37]pp; bothv2models learned seenhard and preserved d1",
+    "source_diagnostic_report": "../artifacts/v2-extrapolation-dev.md",
+    "controller_pid": 2173962,
+    "actual_plan_file": "../artifacts/v3-plan/plan.json",
+    "actual_compute_per_arm": 2001272832,
+    "startup_receipt": "../artifacts/v3-startup.json",
+    "baseline_dev": "../artifacts/v3-initializer-dev.json",
+    "development_progress": "../artifacts/v3-progress.json",
+    "confirmation_tooling": "implemented_and_verified_not_prepared_or_executed",
+    "confirmation_verification": "../artifacts/v3-confirmation-verification.json",
+    "latest_completed_dev_update": "final for conditional and independent; 1000 validated for fixed4",
+    "dev400": {
+      "conditional": {
+        "primary_T4": 0.07421875,
+        "primary_T8": 0.033203125,
+        "seen_hard_T4": 0.0625,
+        "seen_hard_T8": 0.3359375,
+        "d1_T4": 1.0
+      },
+      "independent": {
+        "all_group_depth_accuracies": 0.125,
+        "all_predictions": "F",
+        "count_per_depth": 1280
+      },
+      "scope": "intermediate_development_only_no_selection"
+    },
+    "depth8_startup_receipt": "../artifacts/v3-depth8-startup.json",
+    "stability_note": "STABILITY-NOTES.md",
+    "dev600": {
+      "conditional_d6_T4": 0.0625,
+      "conditional_d6_T8": 0.9375,
+      "conditional_primary_T4": 0.08203125,
+      "conditional_primary_T8": 0.0546875,
+      "conditional_d1_T4": 1.0,
+      "independent_primary_T8": 0.126953125,
+      "independent_d1_T4": 0.15625,
+      "scope": "intermediate_development_only_not_final_or_confirmation",
+      "heatmap": "../artifacts/v3-dev600-heatmap.png",
+      "node_positions": "../artifacts/v3-hop-positions-conditional600.json"
+    },
+    "final_depth_dev_probe": {
+      "tool": "prepare_v3_probe.py",
+      "status": "offline_tool_verified_no_real_preparation_or_execution",
+      "roles": [
+        "initializer",
+        "fixed",
+        "conditional",
+        "independent"
+      ],
+      "depths": [
+        4,
+        6,
+        8,
+        12,
+        16
+      ],
+      "requires": "all three final budgets completed",
+      "primary_unchanged": true,
+      "synthetic_tests_passed": 3,
+      "executor": "run_v3_probe.py",
+      "execution_status": "implemented_reviewed_tested_not_prepared_or_executed",
+      "executor_synthetic_tests_passed": 6,
+      "executor_verification": "../artifacts/v3-probe-executor-verification.json",
+      "remote_cpu_CLI_import_passed": true
+    },
+    "dev800": {
+      "conditional": {
+        "d1": {
+          "4": 1.0,
+          "6": 0.8125,
+          "8": 0.6171875
+        },
+        "seen_hard": {
+          "4": 0.06640625,
+          "6": 0.09375,
+          "8": 0.5390625
+        },
+        "primary": {
+          "4": 0.060546875,
+          "6": 0.068359375,
+          "8": 0.07421875
+        },
+        "d2": {
+          "4": 0.9921875,
+          "6": 0.203125,
+          "8": 0.1171875
+        },
+        "d3": {
+          "4": 0.34375,
+          "6": 0.9921875,
+          "8": 0.578125
+        },
+        "d4": {
+          "4": 0.0859375,
+          "6": 0.9921875,
+          "8": 0.03125
+        },
+        "d6": {
+          "4": 0.0703125,
+          "6": 0.0859375,
+          "8": 0.9765625
+        },
+        "d8": {
+          "4": 0.0625,
+          "6": 0.1015625,
+          "8": 0.1015625
+        },
+        "d9": {
+          "4": 0.0703125,
+          "6": 0.0859375,
+          "8": 0.0703125
+        },
+        "d10": {
+          "4": 0.0703125,
+          "6": 0.046875,
+          "8": 0.140625
+        },
+        "d11": {
+          "4": 0.0546875,
+          "6": 0.0859375,
+          "8": 0.0234375
+        },
+        "d12": {
+          "4": 0.046875,
+          "6": 0.0546875,
+          "8": 0.0625
+        }
+      },
+      "independent": {
+        "d1": {
+          "4": 0.1328125,
+          "6": 0.09375,
+          "8": 0.1328125
+        },
+        "seen_hard": {
+          "4": 0.1171875,
+          "6": 0.1171875,
+          "8": 0.140625
+        },
+        "primary": {
+          "4": 0.111328125,
+          "6": 0.12109375,
+          "8": 0.125
+        },
+        "d2": {
+          "4": 0.109375,
+          "6": 0.1171875,
+          "8": 0.1171875
+        },
+        "d3": {
+          "4": 0.140625,
+          "6": 0.109375,
+          "8": 0.1328125
+        },
+        "d4": {
+          "4": 0.1484375,
+          "6": 0.1171875,
+          "8": 0.1171875
+        },
+        "d6": {
+          "4": 0.109375,
+          "6": 0.1328125,
+          "8": 0.140625
+        },
+        "d8": {
+          "4": 0.125,
+          "6": 0.1015625,
+          "8": 0.140625
+        },
+        "d9": {
+          "4": 0.1171875,
+          "6": 0.125,
+          "8": 0.125
+        },
+        "d10": {
+          "4": 0.1015625,
+          "6": 0.109375,
+          "8": 0.109375
+        },
+        "d11": {
+          "4": 0.1015625,
+          "6": 0.1171875,
+          "8": 0.125
+        },
+        "d12": {
+          "4": 0.125,
+          "6": 0.1328125,
+          "8": 0.140625
+        }
+      },
+      "scope": "intermediate_DEV_only; two d8 optimizer batches completed before DEV800; no selection",
+      "live_snapshot": "../artifacts/v3-dev800-live.json"
+    },
+    "huginn_feasibility": {
+      "note": "HUGINN-FEASIBILITY.md",
+      "status": "official_checkpoint_imported; tiny CPU tests passed; full-model R4/full R32/full R64/window8 synthetic updates completed"
+    },
+    "paired_final_dev": "../artifacts/v3-paired-final-dev.json",
+    "necessary_gate_condition": {
+      "name": "conditional_T8_greater_than_independent_T8_on_final_primary_DEV",
+      "conditional_T8": 0.068359375,
+      "independent_T8": 0.126953125,
+      "passes": false,
+      "implication": "Registered DEV gate cannot pass regardless of pending fixed4 result. Keep test sealed. Complete fixed4 and full descriptive comparisons.",
+      "full_three_arm_comparison_complete": true
+    },
+    "completion_startup_receipt": "../artifacts/v3-paired-completed-fixed4-startup.json",
+    "completed_runs": [
+      {
+        "name": "v3-conditional-s20260914",
+        "termination": "budget",
+        "updates": 1059,
+        "compute_units": 2001272832,
+        "examples": 16944,
+        "checkpoint": "/data/erv1n/ouro-depth-20260913/runs/v3-conditional-s20260914/checkpoint-1059",
+        "final_DEV1280_verified": true,
+        "exit_code": 0
+      },
+      {
+        "name": "v3-independent-s20260914",
+        "termination": "budget",
+        "updates": 1059,
+        "compute_units": 2001272832,
+        "examples": 16944,
+        "checkpoint": "/data/erv1n/ouro-depth-20260913/runs/v3-independent-s20260914/checkpoint-1059",
+        "final_DEV1280_verified": true,
+        "exit_code": 0
+      },
+      {
+        "name": "v3-fixed4-s20260914",
+        "termination": "budget",
+        "updates": 1566,
+        "compute_units": 2001272832,
+        "examples": 25056,
+        "checkpoint": "/data/erv1n/ouro-depth-20260913/runs/v3-fixed4-s20260914/checkpoint-1566",
+        "final_DEV1280_verified": true,
+        "process_exit_verified": true
+      }
+    ],
+    "fixed4_dev200": {
+      "receipt": "../artifacts/v3-fixed4-dev200.json",
+      "scope": "intermediate_only",
+      "d1_T4": 1.0,
+      "d2_T4": 1.0,
+      "primary_T8": 0.064453125
+    },
+    "fixed4_dev400": {
+      "receipt": "../artifacts/v3-fixed4-dev400.json",
+      "scope": "intermediate_only",
+      "compute_units": 511180800,
+      "groups": {
+        "primary": {
+          "4": 0.072265625,
+          "6": 0.052734375,
+          "8": 0.05859375
+        },
+        "seen_hard": {
+          "4": 0.0859375,
+          "6": 0.1953125,
+          "8": 0.12109375
+        },
+        "d1": {
+          "4": 1.0,
+          "6": 1.0,
+          "8": 0.9921875
+        },
+        "d2": {
+          "4": 1.0,
+          "6": 0.9921875,
+          "8": 0.9609375
+        },
+        "d3": {
+          "4": 0.9765625,
+          "6": 0.90625,
+          "8": 0.8515625
+        },
+        "d4": {
+          "4": 0.8671875,
+          "6": 0.4921875,
+          "8": 0.515625
+        },
+        "d6": {
+          "4": 0.109375,
+          "6": 0.3359375,
+          "8": 0.1953125
+        },
+        "d8": {
+          "4": 0.0625,
+          "6": 0.0546875,
+          "8": 0.046875
+        }
+      }
+    },
+    "fixed4_dev600": {
+      "receipt": "../artifacts/v3-fixed4-dev600.json",
+      "scope": "intermediate_only",
+      "compute_units": 766771200,
+      "groups": {
+        "primary": {
+          "4": 0.07421875,
+          "6": 0.05078125,
+          "8": 0.052734375
+        },
+        "seen_hard": {
+          "4": 0.109375,
+          "6": 0.34765625,
+          "8": 0.25390625
+        },
+        "d1": {
+          "4": 1.0,
+          "6": 1.0,
+          "8": 0.9921875
+        },
+        "d2": {
+          "4": 0.9921875,
+          "6": 1.0,
+          "8": 0.984375
+        },
+        "d3": {
+          "4": 1.0,
+          "6": 0.9453125,
+          "8": 0.9375
+        },
+        "d4": {
+          "4": 0.96875,
+          "6": 0.296875,
+          "8": 0.421875
+        },
+        "d6": {
+          "4": 0.1015625,
+          "6": 0.59375,
+          "8": 0.3359375
+        },
+        "d8": {
+          "4": 0.1171875,
+          "6": 0.1015625,
+          "8": 0.171875
+        }
+      }
+    },
+    "fixed4_dev800": {
+      "receipt": "../artifacts/v3-fixed4-dev800.json",
+      "scope": "intermediate_only",
+      "compute_units": 1022361600,
+      "groups": {
+        "primary": {
+          "4": 0.0390625,
+          "6": 0.06640625,
+          "8": 0.072265625
+        },
+        "seen_hard": {
+          "4": 0.37890625,
+          "6": 0.26171875,
+          "8": 0.25390625
+        },
+        "d1": {
+          "4": 0.984375,
+          "6": 0.9921875,
+          "8": 0.9765625
+        },
+        "d2": {
+          "4": 0.9921875,
+          "6": 0.9921875,
+          "8": 1.0
+        },
+        "d3": {
+          "4": 0.9765625,
+          "6": 0.8984375,
+          "8": 0.8671875
+        },
+        "d4": {
+          "4": 0.96875,
+          "6": 0.515625,
+          "8": 0.59375
+        },
+        "d6": {
+          "4": 0.703125,
+          "6": 0.375,
+          "8": 0.375
+        },
+        "d8": {
+          "4": 0.0546875,
+          "6": 0.1484375,
+          "8": 0.1328125
+        }
+      }
+    },
+    "fixed4_dev1000": {
+      "receipt": "../artifacts/v3-fixed4-dev1000.json",
+      "scope": "intermediate_only",
+      "primary_T4": 0.044921875,
+      "primary_T8": 0.171875,
+      "d6_T4": 0.9375,
+      "d8_T6": 0.4375
+    },
+    "final_validation": "../artifacts/v3-final-development-validation.json",
+    "final_comparison": "../artifacts/v3-final-development-comparison.json",
+    "final_primary_accuracy": {
+      "fixed": {
+        "4": 0.103515625,
+        "6": 0.35546875,
+        "8": 0.314453125
+      },
+      "conditional": {
+        "4": 0.060546875,
+        "6": 0.072265625,
+        "8": 0.068359375
+      },
+      "independent": {
+        "4": 0.119140625,
+        "6": 0.12109375,
+        "8": 0.126953125
+      }
+    },
+    "final_DEV_depth_probe": {
+      "status": "completed_all_four_roles",
+      "pid": 1290367,
+      "launched_utc": "2026-09-13T12:19:36Z",
+      "receipt": "../diagnostics/v3-final-depth-dev/controller-launch.json",
+      "depths": [
+        4,
+        6,
+        8,
+        12,
+        16
+      ],
+      "scope": "development_only",
+      "all_shared_depth_scores_exactly_reproduced": true,
+      "summary": "../artifacts/v3-final-depth-dev-summary.md",
+      "summary_json": "../artifacts/v3-final-depth-dev-summary.json",
+      "GPU_release_observed_utc": "2026-09-13T12:25:27Z",
+      "live_pids": []
+    },
+    "unseen_long_depth_observation": {
+      "conditional_T16": 0.373046875,
+      "fixed_T16": 0.09765625,
+      "fixed_T6": 0.35546875,
+      "same_T16_point_gain": 0.275390625,
+      "versus_posthoc_best_fixed_T6_point_gain": 0.017578125,
+      "scope": "exploratory_DEV_depth_curve_not_independent_confirmation",
+      "preserves_original_T8_gate_failure": true
+    }
+  },
+  "huginn_engineering": {
+    "scope": "backup engineering diagnostic only; no research questions or Huginn training run",
+    "revision": "bb6621b65e90b6a4b9b29ef88dc83866d450470c",
+    "import": "completed_and_verified_against_official_digests",
+    "source_receipt": "../artifacts/huginn-model-source.json",
+    "CPU_tiny_official_tests": {
+      "passed": 3,
+      "receipt": "../artifacts/huginn-tiny-cpu-verification.json"
+    },
+    "GPU_smoke": {
+      "status": "completed",
+      "receipt": "../artifacts/huginn-gpu-smoke-verification.json",
+      "completed_utc": "2026-09-13T11:45:54Z",
+      "cases": [
+        "R4/full",
+        "R32/full",
+        "R64/window8"
+      ],
+      "scope": "B1 L128 synthetic tokens; one sequential update per case; no research data or saved model",
+      "peak_allocated_bytes": 59854529024,
+      "peak_reserved_bytes": 65515028480,
+      "previous_failed_attempt_retained": true
+    },
+    "weights_local": false,
+    "tokenization_audit": {
+      "receipt": "../artifacts/huginn-v3-tokenization-audit.json",
+      "train_dev_rows": 25280,
+      "max_tokens": 209,
+      "all_answer_boundaries_match": true,
+      "test_read": false
+    },
+    "accumulation_capacity": {
+      "status": "completed_verified",
+      "micro_batch": 2,
+      "sequence_length": 256,
+      "accumulation_steps": 8,
+      "effective_batch": 16,
+      "cases": [
+        "R32/window8",
+        "R64/window8"
+      ],
+      "scope": "synthetic_engineering_only",
+      "pid": 1979601,
+      "launched_utc": "2026-09-13T11:55:40.195027+00:00",
+      "attempt_label": "task-length-accum8",
+      "CPU_verification": "../artifacts/huginn-capacity-tiny-cpu-verification.json",
+      "source_review": "../artifacts/huginn-capacity-source-review.json",
+      "completed_utc": "2026-09-13T11:56:05Z",
+      "receipt": "../artifacts/huginn-accumulation-capacity-verification.json",
+      "peak_allocated_bytes": 68145665536,
+      "peak_reserved_bytes": 71624032256,
+      "all_16_microbatch_windows_and_resident_gradients_verified": true,
+      "model_saved": false,
+      "research_data_used": false
+    },
+    "next_scientific_design": {
+      "status": "proposal_only_not_frozen_or_launched_now_reassessing_route_after_full_Ouro_curve",
+      "recommendation": "F32 vs F64 with commonK8; only then test curriculum ordering",
+      "review": "../artifacts/huginn-next-experiment-review.md",
+      "budget_proxy": "../artifacts/huginn-training-budget-derivation.json",
+      "depends_on": "complete_Ouro_long_depth_curve_now_available; primary_training_route_review_pending"
+    },
+    "fixed_training_core": {
+      "status": "implemented_and_tiny_CPU_verified_root_reviewed",
+      "receipt": "../artifacts/huginn-training-tiny-cpu-verification.json",
+      "review": "../artifacts/huginn-training-core-review.json",
+      "actual_task_training_launched": true,
+      "full_GPU_resume_verified": false
+    }
+  },
+  "huginn_calibration": {
+    "scope": "raw_checkpoint_d1_d2_task_format_calibration_only",
+    "protocol": "HUGINN-CALIBRATION.md",
+    "manifest": "../diagnostics/huginn-calibration/manifest.json",
+    "questions": 256,
+    "depths": [
+      32,
+      64
+    ],
+    "eval_seed": 18931,
+    "status": "completed_no_BOS_failed_readiness",
+    "pid": 3660596,
+    "launched_utc": "2026-09-13T12:07:10.481750+00:00",
+    "attempt": "raw-pretrained-path-fix",
+    "prior_attempt": "pre_GPU_failure_relative_CPU_receipt_path",
+    "path_fix": "../artifacts/huginn-calibration-path-fix.json",
+    "CPU_verification": "../artifacts/huginn-paired-eval-cpu-verification.json",
+    "focused_review": "../artifacts/huginn-calibration-review.md",
+    "training_performed": false,
+    "test_data_used": false,
+    "counts_as_hard_task_goal_success": false,
+    "completed_utc": "2026-09-13T12:11:05Z",
+    "input_interface": "no_special_tokens",
+    "verification": "../artifacts/huginn-raw-calibration-verification.json",
+    "token_audit": "../artifacts/huginn-raw-calibration-token-audit.json",
+    "all_512_predicted_tokens": "newline_token10",
+    "raw_accuracy": {
+      "1": {
+        "32": 0.0,
+        "64": 0.0
+      },
+      "2": {
+        "32": 0.0,
+        "64": 0.0
+      }
+    },
+    "calibration_passes": false,
+    "native_interface_followup": {
+      "status": "completed_verified_readiness_failed",
+      "protocol": "HUGINN-NATIVE-INTERFACE.md",
+      "only_change": "official BOS65504",
+      "parent_failure_retained": true,
+      "attempt": "raw-native-bos",
+      "pid": 2202300,
+      "launched_utc": "2026-09-13T12:25:51.098883+00:00",
+      "verified_live_utc": "2026-09-13T12:27:23.216169+00:00",
+      "questions_with_both_depth_logits": 256,
+      "process_exited_verified_utc": "2026-09-13T12:30:13.913007+00:00",
+      "questions_scored": 256,
+      "raw_accuracy": {
+        "1": {
+          "32": 0.0,
+          "64": 0.0
+        },
+        "2": {
+          "32": 0.0,
+          "64": 0.0
+        }
+      },
+      "calibration_passes": false,
+      "elapsed_seconds": 224.24636849295348,
+      "verification": "../artifacts/huginn-native-calibration-verification.json",
+      "all_512_predicted_tokens": "newline_token10",
+      "training_performed": false
+    }
+  },
+  "huginn_shared_adaptation": {
+    "status": "completed_readiness_failed",
+    "protocol": "HUGINN-SHARED-ADAPTATION.md",
+    "data": "../data/huginn-shared-adaptation",
+    "data_verification": "../artifacts/huginn-adaptation-data-verification.json",
+    "updates": 256,
+    "examples": 4096,
+    "depth": 32,
+    "window": 8,
+    "selected_as_next_main_route": false,
+    "actual_updates": 256,
+    "actual_examples": 4096,
+    "readiness": {
+      "ready": false,
+      "raw_accuracy": {
+        "1": {
+          "32": 0.125,
+          "64": 0.125
+        },
+        "2": {
+          "32": 0.125,
+          "64": 0.125
+        }
+      },
+      "thresholds": {
+        "d1": 0.95,
+        "d2": 0.8,
+        "both_depths_required": true
+      },
+      "scope": "common simple-task initialization only; not deeper-training or hard-task success"
+    },
+    "all_final_prediction_tokens": "F_space_prefixed_token445",
+    "verification": "../artifacts/huginn-adaptation-final-observation.json",
+    "actual_runtime_verified_updates": {
+      "from": 1,
+      "through": 256
+    },
+    "full_checkpoint_reload_tested": false,
+    "main_training_launched": false
+  },
+  "v4": {
+    "protocol": "PROTOCOL-v4.md",
+    "data": "../data/v4-pointer",
+    "seed": 20260915,
+    "data_seed": 19931,
+    "status": "both_running_matched_two_thirds_dev_no_hard_gain",
+    "plan_fingerprint": "9579976e966bfa5ecaa20bc4ad89aab852d8a72c9ecb1ba4aabc02d44cc407e9",
+    "padding_width": 208,
+    "budget_each": 3067084800,
+    "arms": {
+      "fixed4": {
+        "updates": 2400,
+        "gpu": 4,
+        "name": "v4-fixed4-s20260915",
+        "arm": "fixed4",
+        "pid": 1077942,
+        "status": "running",
+        "observed_update": 2049,
+        "observed_utc": "2026-09-13T13:51:15Z",
+        "target_updates": 2400,
+        "budget": 3067084800,
+        "compute_units": 2618523648,
+        "process_observed_live_utc": "2026-09-13T13:51:18+00:00"
+      },
+      "fixed8": {
+        "updates": 1200,
+        "gpu": 5,
+        "name": "v4-fixed8-s20260915",
+        "arm": "fixed8",
+        "pid": 1078424,
+        "status": "running",
+        "observed_update": 1168,
+        "observed_utc": "2026-09-13T13:51:14Z",
+        "target_updates": 1200,
+        "budget": 3067084800,
+        "compute_units": 2985295872,
+        "process_observed_live_utc": "2026-09-13T13:51:18+00:00"
+      }
+    },
+    "initializer_controller_pid": 674920,
+    "initializer_model_pid": 676076,
+    "test_scored": false,
+    "review": "../artifacts/v4-root-review.json",
+    "controller_pid": 1070551,
+    "initializer_status": "completed_bound_1280_rows_d1_T4_100percent",
+    "startup_verification": "../artifacts/v4-startup-verification.json",
+    "confirmation_tooling": {
+      "status": "implemented_reviewed_6_synthetic_tests_passed_not_executed",
+      "guide": "CONFIRMATION-v4.md",
+      "receipt": "../artifacts/v4-confirmation-synthetic-verification.json"
+    },
+    "progress_script": "plot_v4_progress.py",
+    "progress_plot_status": "fixed4 DEV400/800/1200/1600/2000 and fixed8 DEV400/800; latest observed losses; visually checked, no imputation",
+    "current_progress": "../artifacts/v4-current-progress.json",
+    "first_dev": {
+      "arm": "fixed4",
+      "update": 400,
+      "count": 1280,
+      "depths": [
+        4,
+        6,
+        8,
+        16
+      ],
+      "all_hops_all_depths_raw_accuracy": 0.125,
+      "constant_prediction": " D",
+      "constant_prediction_token": 422,
+      "d1_T4_initializer": 1.0,
+      "d1_T4_now": 0.125,
+      "binding": "../artifacts/v4-fixed4-dev400-validation.json",
+      "interpretation": "Verified intermediate fixed4 loss of one-hop accuracy; not final failure or a fixed8 comparison"
+    },
+    "early_diagnostic": "../artifacts/v4-early-optimization-diagnostic.md",
+    "matched_one_third_dev": {
+      "updates": {
+        "fixed4": 800,
+        "fixed8": 400
+      },
+      "compute_units_each": 1022361600,
+      "primary_accuracy": {
+        "fixed4": {
+          "4": 0.125,
+          "6": 0.125,
+          "8": 0.125,
+          "16": 0.125
+        },
+        "fixed8": {
+          "4": 0.140625,
+          "8": 0.119140625,
+          "16": 0.123046875
+        }
+      },
+      "own_exit_accuracy": {
+        "fixed4": {
+          "1": 0.125,
+          "2": 0.125,
+          "6": 0.125,
+          "8": 0.125
+        },
+        "fixed8": {
+          "1": 0.0703125,
+          "2": 0.1015625,
+          "6": 0.125,
+          "8": 0.125
+        }
+      },
+      "report": "../artifacts/v4-dev-one-third-budget.md",
+      "fixed4_constant_token": 426,
+      "fixed4_constant_answer": " F",
+      "confirmation_allowed": false,
+      "scope": "intermediate only"
+    },
+    "engineering_prototype": {
+      "scope": "tiny CPU multi-exit gradient semantics only; no production training changes",
+      "verification": "../artifacts/ouro-multi-exit-cpu-verification.json",
+      "tests_passed": 2,
+      "gpu_or_model_effectiveness_claim": false
+    },
+    "candidate_route_review": "../artifacts/deeper-loop-after-v4-route-review.md",
+    "fixed4_half_budget_dev": {
+      "update": 1200,
+      "compute_units": 1533542400,
+      "scope": "intermediate only; no matched fixed8 DEV at this budget",
+      "primary_accuracy": {
+        "4": 0.130859375,
+        "6": 0.1171875,
+        "8": 0.119140625,
+        "16": 0.126953125
+      },
+      "own_exit_accuracy": {
+        "1": 0.125,
+        "2": 0.1328125,
+        "6": 0.1171875,
+        "8": 0.140625
+      },
+      "constant_prediction": false,
+      "canonical_answers_observed": [
+        "A",
+        "B",
+        "G"
+      ],
+      "binding": "../artifacts/v4-fixed4-dev1200-validation.json",
+      "runtime": "../artifacts/v4-dev1200-runtime-snapshot.json",
+      "confirmation_allowed": false
+    },
+    "offline_error_position_diagnostic": "../artifacts/loop-error-position-diagnostic.md",
+    "static_mechanism_audit": "../artifacts/ouro-depth-mechanism-audit.md",
+    "matched_two_thirds_dev": {
+      "updates": {
+        "fixed4": 1600,
+        "fixed8": 800
+      },
+      "compute_units_each": 2044723200,
+      "primary_accuracy": {
+        "fixed4": {
+          "4": 0.125,
+          "6": 0.125,
+          "8": 0.125,
+          "16": 0.125
+        },
+        "fixed8": {
+          "4": 0.125,
+          "8": 0.125,
+          "16": 0.125
+        }
+      },
+      "own_exit_accuracy": {
+        "fixed4": {
+          "1": 0.125,
+          "2": 0.125,
+          "6": 0.125,
+          "8": 0.125
+        },
+        "fixed8": {
+          "1": 0.125,
+          "2": 0.125,
+          "6": 0.125,
+          "8": 0.125
+        }
+      },
+      "scope": "intermediate_development_only",
+      "report": "../artifacts/v4-dev-two-thirds-budget.md",
+      "runtime": "../artifacts/v4-two-thirds-runtime-snapshot.json",
+      "confirmation_allowed": false
+    },
+    "fixed4_five_sixths_dev": {
+      "update": 2000,
+      "compute_units": 2555904000,
+      "scope": "intermediate only",
+      "primary_accuracy": {
+        "4": 0.125,
+        "6": 0.125,
+        "8": 0.125,
+        "16": 0.125
+      },
+      "constant_raw_token": 340,
+      "constant_raw_answer": "C",
+      "binding": "../artifacts/v4-fixed4-dev2000-validation.json",
+      "final_result": false
+    }
+  },
+  "goal_turn_audit": {
+    "previous_turn": "progress",
+    "current_turn": "progress",
+    "goal_complete": false,
+    "authoritative_evidence": [
+      "Final Ouro extension budgets complete; all registered comparisons negative for practical hard-depth objective",
+      "New output-position diagnostic describes actual errors without internal-step claims",
+      "Huginn common adaptation passed combined review and actual remote prerequisite/data preflight",
+      "Actual GPU5 training PID419388 and first2 updates/gradients/core displacement verified",
+      "Main experiment remains conditional draft; no new main data or sealed confirmation scored"
+    ]
+  },
+  "candidate_extension": {
+    "status": "completed_development_failed",
+    "adoption": "../artifacts/extension-candidate-adoption.json",
+    "plan_fingerprint": "9c76cfb71158c84e798b8619b17e0a0b59541d6fedcf423120230376c7e4b834",
+    "initializer_controller_pid": 3896690,
+    "initializer_directory": "/data/erv1n/ouro-depth-20260913/diagnostics/extension-candidate-initializer-dev",
+    "training_started": true,
+    "test_scored": false,
+    "gate": "New DEV T4 d1/d2 >=98% and d6/d8 >=90% individually before either training arm",
+    "train_controller_pid": 230854,
+    "initializer_screen_passed": true,
+    "initializer_observation": "../artifacts/extension-candidate-initializer-observation.json",
+    "initializer_raw_T4": {
+      "d1": 1.0,
+      "d2": 1.0,
+      "d6": 0.984375,
+      "d8": 0.953125
+    },
+    "initializer_primary": {
+      "4": 0.134765625,
+      "6": 0.375,
+      "8": 0.328125,
+      "16": 0.091796875
+    },
+    "runtime_verification": "../artifacts/extension-candidate-runtime-verification.json",
+    "runtime_verified_through_update": {
+      "control": 210,
+      "extension": 155
+    },
+    "actual_R4_R6_R8_transitions_verified": true,
+    "training_effectiveness_established": false,
+    "development_eligible": false,
+    "final_metadata": "../artifacts/extension-final-metadata.json",
+    "final_comparison": "../artifacts/extension-final-dev-comparison.json",
+    "training_processes_absent_observed_utc": "2026-09-13T14:24:10Z",
+    "offline_error_positions": "../artifacts/extension-error-position-diagnostic.md"
+  },
+  "completed_v4_runs": [
+    {
+      "name": "v4-fixed4-s20260915",
+      "arm": "fixed4",
+      "pid": 1077942,
+      "gpu": 4,
+      "status": "completed",
+      "observed_update": 2400,
+      "observed_utc": "2026-09-13T14:02:16Z",
+      "target_updates": 2400,
+      "budget": 3067084800,
+      "compute_units": 3067084800,
+      "process_observed_live_utc": "2026-09-13T13:51:18+00:00"
+    },
+    {
+      "name": "v4-fixed8-s20260915",
+      "arm": "fixed8",
+      "pid": 1078424,
+      "gpu": 5,
+      "status": "completed",
+      "observed_update": 1200,
+      "observed_utc": "2026-09-13T13:54:42Z",
+      "target_updates": 1200,
+      "budget": 3067084800,
+      "compute_units": 3067084800,
+      "process_observed_live_utc": "2026-09-13T13:51:18+00:00"
+    }
+  ],
+  "v4_final": {
+    "status": "completed_development_failed",
+    "metadata": "../artifacts/v4-final-metadata.json",
+    "comparison": "../artifacts/v4-final-dev-comparison.json",
+    "fixed4_updates": 2400,
+    "fixed8_updates": 1200,
+    "work_each": 3067084800,
+    "primary_accuracy_all_trained_exits": 0.125,
+    "test_scored": false
+  },
+  "completed_extension_runs": [
+    {
+      "name": "extension-control-s20260916",
+      "arm": "control",
+      "gpu": 4,
+      "pid": 252528,
+      "target_updates": 384,
+      "status": "completed",
+      "budget": 490733568,
+      "observed_update": 384,
+      "observed_utc": "2026-09-13T14:15:10Z",
+      "compute_units": 490733568,
+      "checkpoint": "/data/erv1n/ouro-depth-20260913/runs/extension-control-s20260916/checkpoint-384"
+    },
+    {
+      "name": "extension-curriculum-s20260916",
+      "arm": "extension",
+      "gpu": 5,
+      "pid": 252922,
+      "target_updates": 240,
+      "status": "completed",
+      "budget": 490733568,
+      "observed_update": 240,
+      "observed_utc": "2026-09-13T14:15:10Z",
+      "compute_units": 490733568,
+      "checkpoint": "/data/erv1n/ouro-depth-20260913/runs/extension-curriculum-s20260916/checkpoint-240"
+    }
+  ],
+  "next_huginn_adaptation": {
+    "status": "running_real_updates_verified",
+    "protocol": "HUGINN-SHARED-ADAPTATION.md",
+    "training_started": true,
+    "updates": 256,
+    "training_depth": 32,
+    "gradient_window": 8,
+    "scope": "Common task readiness only, cannot establish hard-task extra-loop benefit",
+    "estimated_training_seconds_from_single_update": 2538.496,
+    "timing_boundary": "Single-update extrapolation, plus two ~224-second calibrations and unmeasured checkpoint I/O; not a throughput guarantee",
+    "dispatched_utc": "2026-09-13T14:39:44.140057+00:00",
+    "pid": 419388,
+    "run": "runs/huginn-shared-adaptation-s19872",
+    "root_review": "../artifacts/huginn-adaptation-root-review.json",
+    "runtime_startup": "../artifacts/huginn-adaptation-runtime-startup.json",
+    "final_readiness_observed": false,
+    "incremental_runtime_evidence": [
+      "../artifacts/huginn-adaptation-progress-1.json",
+      "../artifacts/huginn-adaptation-progress-2.json"
+    ]
+  },
+  "huginn_main_preparation": {
+    "status": "draft_engineering_complete_readiness_prerequisite_failed",
+    "protocol": "HUGINN-DEPTH-EXPERIMENT-DRAFT.md",
+    "adopted": false,
+    "research_data_generated": false,
+    "training_started": false,
+    "new_engineering": [
+      "Fixed-work/shared-prefix plan preparation",
+      "Native training latent/RNG pairing at R32/R64",
+      "Model-only transfer preserving tied parameters and resetting experiment state",
+      "Fresh graph data preparation and exclusion audit, synthetic verification only",
+      "Four-role T32/T48/T64 offline comparison with DEV-fixed TEST contrasts, synthetic verification only"
+    ],
+    "review": "../artifacts/huginn-main-preparation-review.json",
+    "scoped_new_tests_passed": 6,
+    "new_data_preparation_tests_passed": 4,
+    "new_comparator_tests_passed": 5
+  },
+  "research_objective": "../RESEARCH_OBJECTIVE.md",
+  "research_direction_clarified_date": "2026-09-13",
+  "research_direction": "Train shared recurrent computation so additional loops learn to improve hard-task reasoning; evaluate within-model gains and training attribution separately."
+}
