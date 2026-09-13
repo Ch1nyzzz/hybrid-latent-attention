@@ -46,6 +46,16 @@
 !/artifacts/v4-progress.csv
 !/artifacts/v4-progress.png
 !/artifacts/v4-progress.svg
+!/artifacts/v5-final-dev-comparison.json
+!/artifacts/v5-final-dev-comparison.md
+!/artifacts/v5-final-depth-dev.csv
+!/artifacts/v5-final-depth-dev.png
+!/artifacts/v5-final-depth-dev.svg
+!/artifacts/v5-training/
+/artifacts/v5-training/*
+!/artifacts/v5-training/plan_receipt.json
+!/artifacts/v5-training/frozen.json
+!/artifacts/v6-single-token-labels.json
 !/diagnostics/
 /diagnostics/*
 !/diagnostics/huginn-engineering/

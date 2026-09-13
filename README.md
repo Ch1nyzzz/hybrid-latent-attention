@@ -14,8 +14,10 @@
 - Ouro 的浅循环训练模型在部分 DEV 难题上出现额外推理循环收益；现有深循环训练方案尚未建立可靠的训练归因。这个信号保留，但不能说已经训练出了目标能力。
 - Huginn 已完成官方接口接入和一轮固定 R32/K8 共同适配：4096 个一跳/两跳样本、256 次更新。最终 T32/T64 的正确率均为 12.5%，所有预测为 F；适配失败。
 - Huginn F32/F64 对照目前只有草案与工程准备，未启动。16 题重复拟合诊断尚未启动。尚无独立 TEST 确认、自适应停止策略或真实数学/代码任务结果。
+- V5（progressive：随机无梯度前缀 + 末 4 轮有梯度，从 V3 fixed4 续训，四臂）已完成：预定六项判断全部失败，密封 test 未评分。七出口矩阵显示 fixed4 训练的块在额外循环中会继续沿链前进但不会在目标处停住（越界），progressive 信号只教会“保持”、压制了“继续”。
+- V6（逐轮节点监督：第 r 轮出口监督为走 min(r,d) 跳后的节点，答案改为单 token 节点，四臂）已启动，结果未出。
 
-完整说明：[Ouro V3](ouro_depth/FINDINGS-v3.md)、[Ouro 后续扩深](ouro_depth/FINDINGS-extension.md)、[Huginn](ouro_depth/FINDINGS-huginn.md)。历史协议和负结果保留原样；澄清研究方向不改变历史实验的成功条件。
+完整说明：[Ouro V3](ouro_depth/FINDINGS-v3.md)、[Ouro 后续扩深](ouro_depth/FINDINGS-extension.md)、[Huginn](ouro_depth/FINDINGS-huginn.md)、[V5 progressive](ouro_depth/FINDINGS-v5.md)、[V6 协议](ouro_depth/PROTOCOL-v6.md)。历史协议和负结果保留原样；澄清研究方向不改变历史实验的成功条件。
 
 ## 代码地图
 
@@ -26,6 +28,8 @@
 | `ouro_depth/huginn_*.py` | Huginn 循环/梯度窗口、训练、评估与初始化工具 |
 | `ouro_depth/run_huginn_adaptation.py` | 已完成的固定简单任务适配入口 |
 | `ouro_depth/compare*_predictions.py` | 已保存逐题结果的配对分析 |
+| `ouro_depth/v5_plan.py`, `train_v5.py`, `launch_v5.py`, `compare_v5_predictions.py`, `plot_v5.py` | V5 progressive（随机无梯度前缀 + 固定梯度窗口）训练、启动、七出口比较与作图 |
+| `ouro_depth/prepare_v6_data.py`, `v6_plan.py`, `train_v6.py`, `launch_v6.py` | V6 pointer-node 语料（单 token 节点答案）与逐轮节点监督训练/评估 |
 | `ouro_depth/tests/` | 实现与合成数据测试 |
 | `diagnostics/` 中提交的 `.py` | 部分入口和测试依赖的诊断源码；不含运行数据 |
 | `ouro_depth/PROTOCOL*.md`, `FINDINGS*.md` | 历史实验设计与结果 |
