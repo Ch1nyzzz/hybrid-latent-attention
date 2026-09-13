@@ -15,9 +15,9 @@
 - Huginn 已完成官方接口接入和一轮固定 R32/K8 共同适配：4096 个一跳/两跳样本、256 次更新。最终 T32/T64 的正确率均为 12.5%，所有预测为 F；适配失败。
 - Huginn F32/F64 对照目前只有草案与工程准备，未启动。16 题重复拟合诊断尚未启动。尚无独立 TEST 确认、自适应停止策略或真实数学/代码任务结果。
 - V5（progressive：随机无梯度前缀 + 末 4 轮有梯度，从 V3 fixed4 续训，四臂）已完成：预定六项判断全部失败，密封 test 未评分。七出口矩阵显示 fixed4 训练的块在额外循环中会继续沿链前进但不会在目标处停住（越界），progressive 信号只教会“保持”、压制了“继续”。
-- V6（逐轮节点监督：第 r 轮出口监督为走 min(r,d) 跳后的节点，答案改为单 token 节点，四臂）已启动，结果未出。
+- V6（逐轮节点监督，答案改为单 token 节点，四臂）已完成：只监督“走 r 跳”的 step_nohold 臂在训练 d≤8 后，未见 d9–12 在 T=d 出口 99–100%，33 节点 d13–16 各 98%，落点每轮恰好一跳——额外循环执行额外推理的直接、可训练证据。加保持目标（step）或只监督终点（terminal/fixed8）都不外推。停止问题：冻结体上的 GRPO 门在保持训练的体上能精确停在第 d 轮；倒计时头只外推约 2 跳；“目标到达”式停止（V8 step_done）与通用配方（V7）、算术链（V8）实验进行中。
 
-完整说明：[Ouro V3](ouro_depth/FINDINGS-v3.md)、[Ouro 后续扩深](ouro_depth/FINDINGS-extension.md)、[Huginn](ouro_depth/FINDINGS-huginn.md)、[V5 progressive](ouro_depth/FINDINGS-v5.md)、[V6 协议](ouro_depth/PROTOCOL-v6.md)。历史协议和负结果保留原样；澄清研究方向不改变历史实验的成功条件。
+完整说明：[Ouro V3](ouro_depth/FINDINGS-v3.md)、[Ouro 后续扩深](ouro_depth/FINDINGS-extension.md)、[Huginn](ouro_depth/FINDINGS-huginn.md)、[V5 progressive](ouro_depth/FINDINGS-v5.md)、[V6 逐轮监督](ouro_depth/FINDINGS-v6.md)、[V7/V8/V9 协议](ouro_depth/PROTOCOL-v7.md)。历史协议和负结果保留原样；澄清研究方向不改变历史实验的成功条件。
 
 ## 代码地图
 

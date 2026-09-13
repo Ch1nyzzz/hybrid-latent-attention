@@ -56,6 +56,11 @@
 !/artifacts/v5-training/plan_receipt.json
 !/artifacts/v5-training/frozen.json
 !/artifacts/v6-single-token-labels.json
+!/artifacts/v6-final-dev-comparison.json
+!/artifacts/v6-final-dev-comparison.md
+!/artifacts/v6-final-depth-dev.csv
+!/artifacts/v6-final-depth-dev.png
+!/artifacts/v6-final-depth-dev.svg
 !/artifacts/v8-digit-labels.json
 !/diagnostics/
 /diagnostics/*
