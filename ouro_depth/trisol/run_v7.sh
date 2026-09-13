@@ -38,7 +38,7 @@ PY
 fi
 python -c "import torch, transformers, sys; print('torch', torch.__version__, 'transformers', transformers.__version__, 'cuda', torch.cuda.is_available(), 'python', sys.version)"
 WHEELS=$(dirname "$(find /trisol/input/datasets -name 'transformers-4.56.2*.whl' | head -1)")
-python - <<'EOF' || pip install --no-index --find-links "$WHEELS" --no-deps transformers==4.56.2 huggingface_hub==0.34.4 tokenizers==0.21.4 2>&1 | tail -3
+python - <<'EOF' || pip install --no-index --find-links "$WHEELS" --no-deps transformers==4.56.2 huggingface_hub==0.34.4 tokenizers==0.22.1 2>&1 | tail -3
 import transformers
 v = tuple(int(x) for x in transformers.__version__.split('.')[:2])
 assert (4, 55) <= v < (5, 0), transformers.__version__
