@@ -31,7 +31,7 @@ PATTERN = re.compile(r'Follow exactly ([0-9]+) directed links from ([a-z]{2})\. 
 def load_labels(path):
     payload = json.loads(Path(path).read_text())
     labels = [item['label'] for item in payload['labels']]
-    if len(labels) != payload['count'] or len(set(labels)) != len(labels) or any(not re.fullmatch(r'[a-z]{2}', l) for l in labels):
+    if len(labels) != payload['count'] or len(set(labels)) != len(labels) or any(not re.fullmatch(r'[a-z0-9]{1,2}', l) for l in labels):
         raise ValueError('Invalid single-token label list')
     return labels, {item['label']: item['token_id'] for item in payload['labels']}
 
