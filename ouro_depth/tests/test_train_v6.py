@@ -112,5 +112,43 @@ class V6TrainerCPU(unittest.TestCase):
                     self.assertEqual(score['correct'], score['prediction_token'] == token_ids[row['answer']])
 
 
+class V6CountdownCPU(unittest.TestCase):
+    def test_step_count_trains_head_and_reports_self_stop(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.ExitStack() as stack:
+            root = Path(temporary)
+            stack.enter_context(patch.object(torch.cuda, 'manual_seed_all'))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            labels = _labels_file(root)
+            data.prepare(root, root / 'corpus', labels, seed=4, train_per_depth=4, dev_per_depth=1, test_per_depth=1, probe_per_depth=1)
+            fixtures.seed(12)
+            config = OuroConfig(vocab_size=80, hidden_size=16, intermediate_size=32, num_hidden_layers=1,
+                                num_attention_heads=2, num_key_value_heads=1, max_position_embeddings=32,
+                                pad_token_id=0, bos_token_id=1, eos_token_id=2, use_cache=False, tie_word_embeddings=False)
+            config._attn_implementation = 'sdpa'
+            model = OuroDepthModel(OuroForCausalLM(config).float(), mode='full', checkpointing=True)
+            t.attach_count_head(model)
+            _, token_ids = data.load_labels(labels)
+            args = SimpleNamespace(output=str(root / 'run'), data_dir=str(root / 'corpus'), model_path=str(root / 'base'),
+                                   labels=str(labels), checkpoint=None, plan_path=None, resume=None, device='cpu', arm='step_count',
+                                   seed=20260918, batch_size=2, micro_batch=1, eval_batch=2, max_length=16, padding_width=8,
+                                   max_updates=3, weight_decay=.01, clip=1., depths=list(v6_plan.EVAL_DEPTHS), pad_id=0)
+            plan, _, _ = t.prepare_plan(NodeTokenizer(), args, 1, token_ids)
+            self.assertEqual(sorted(map(int, plan['arms']['step_count'][0]['count_targets'])), list(range(1, plan['arms']['step_count'][0]['depth'] + 1)))
+            self.assertEqual(plan['arms']['step_nohold'][0]['count_targets'], {})
+            (root / 'plan.json').write_text(json.dumps(plan))
+            args.plan_path = str(root / 'plan.json')
+            result = t.train(model, NodeTokenizer(), args, token_ids)
+            updates = [json.loads(l) for l in (root / 'run/metrics.jsonl').read_text().splitlines() if 'per_exit_ce' in l]
+            self.assertEqual(len(updates), 3)
+            self.assertTrue(all(u['count_ce'] is not None and u['count_ce'] > 0 for u in updates))
+            payload = torch.load(Path(result['checkpoint']) / 'trainable.pt', map_location='cpu', weights_only=True)
+            self.assertIn('count_head.weight', payload['state_dict'])
+            dev = t.encode_rows(t.load_rows(str(root / 'corpus/dev.jsonl')), NodeTokenizer(), token_ids, 16)
+            summary = t.evaluate(model, dev, args, [1, 2, 3], root / 'eval', {v: k for k, v in token_ids.items()})
+            self.assertIn('self_stop', summary['metrics']['all'])
+            rows = [json.loads(l) for l in (root / 'eval.predictions.jsonl').read_text().splitlines()]
+            self.assertTrue(all('count_pred' in r['scores']['1'] and 'self_stop' in r for r in rows))
+
+
 if __name__ == '__main__':
     unittest.main()

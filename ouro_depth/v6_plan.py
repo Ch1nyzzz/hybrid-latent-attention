@@ -13,7 +13,7 @@ import math
 import random
 
 PROTOCOL = 'ouro_depth_step_supervision_v6'
-ARMS = ('step', 'step_nohold', 'terminal', 'fixed8')
+ARMS = ('step', 'step_nohold', 'terminal', 'fixed8', 'step_count')
 FAMILIES = ('pointer_node', 'arith_value')
 TASK_DEPTHS = (1, 2, 3, 4, 6, 8)
 # (updates, allowed difficulties); each stage is a multiple of its difficulty count.
@@ -27,7 +27,10 @@ ENDPOINT_FRACTIONS = (.25, .5, .75, 1.)
 SUPERVISION = {'step': 'exits 1..T, target = node after min(exit, hops) links',
                'step_nohold': 'exits 1..hops, target = node after exit links; exits beyond hops unsupervised',
                'terminal': 'exit T only, target = node after hops links',
-               'fixed8': 'T = 8 for every batch, exit 8 only, target = node after hops links'}
+               'fixed8': 'T = 8 for every batch, exit 8 only, target = node after hops links',
+               'step_count': 'node targets as step_nohold PLUS an auxiliary countdown head at every exit 1..T '
+                             'predicting max(hops - exit, 0); stop = first exit whose predicted countdown is 0'}
+COUNT_CLASSES = 17
 
 
 def fingerprint(value):
@@ -45,7 +48,7 @@ def supervised_exits(arm, depth, hops):
     """Return {exit: hop index whose node is the target} for one batch."""
     if arm == 'step':
         return {r: min(r, hops) for r in range(1, depth + 1)}
-    if arm == 'step_nohold':
+    if arm in ('step_nohold', 'step_count'):
         return {r: r for r in range(1, hops + 1)}
     return {depth: hops}
 
@@ -96,6 +99,7 @@ def build_plan(rows, *, seed=20260918, batch_size=16, padding_width, num_layers=
             used += work
             records.append({**copy.deepcopy(record), 'update': index + 1, 'depth': depth,
                             'targets': {str(r): h for r, h in supervised_exits(arm, depth, record['difficulty']).items()},
+                            'count_targets': {str(r): max(record['difficulty'] - r, 0) for r in range(1, depth + 1)} if arm == 'step_count' else {},
                             'lr': lr_at(index + 1, UPDATES), 'compute_units': work, 'cumulative_compute': used})
         arms[arm], budget[arm] = records, used
     endpoints = sorted({int(round(UPDATES * f)) for f in ENDPOINT_FRACTIONS})

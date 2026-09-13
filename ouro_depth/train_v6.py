@@ -24,7 +24,8 @@ from .train import amp, load_rows, log, seed_all, write_json
 from .train_v3 import checkpoint, collate_fixed, file_sha256, initializer_file, _rollback_uncommitted_metrics, _write_or_validate
 from .train_v4 import source_receipt as shared_source_receipt
 from .prepare_v6_data import load_labels
-from .v6_plan import ARMS, EVAL_DEPTHS, PEAK_LR, UPDATES, PlanCursor, build_plan, fingerprint
+from .v6_plan import ARMS, COUNT_CLASSES, EVAL_DEPTHS, PEAK_LR, UPDATES, PlanCursor, build_plan, fingerprint
+from torch import nn
 
 EXTRA_SOURCE = ('v6_plan.py', 'train_v6.py', 'prepare_v6_data.py', 'PROTOCOL-v6.md')
 PRODUCTION = {'seed': 20260918, 'batch_size': 16, 'micro_batch': 8, 'num_layers': 24, 'trainable': 1_233_324_032}
@@ -83,13 +84,28 @@ def _validate_config(model, args):
     if any(p.dtype != torch.float32 or p.device != device for p in params):
         raise ValueError('FP32 parameters on one device required')
     expected = {id(p) for p in model.base.model.layers.parameters()} | {id(p) for p in model.base.model.norm.parameters()}
+    head = getattr(model, 'count_head', None)
+    if head is not None:
+        expected |= {id(p) for p in head.parameters()}
     if {id(p) for p in params if p.requires_grad} != expected:
-        raise ValueError('Complete shared decoder/norm only must be trainable')
+        raise ValueError('Complete shared decoder/norm (plus the optional countdown head) only must be trainable')
+    if (args.arm == 'step_count') != (head is not None):
+        raise ValueError('step_count requires the countdown head and other arms must not have it')
     if device.type == 'cuda':
+        body = model.trainable_count - (sum(p.numel() for p in head.parameters()) if head is not None else 0)
         actual = {'seed': args.seed, 'batch_size': args.batch_size, 'micro_batch': args.micro_batch,
-                  'num_layers': model.config.num_hidden_layers, 'trainable': model.trainable_count}
+                  'num_layers': model.config.num_hidden_layers, 'trainable': body}
         if actual != PRODUCTION:
             raise ValueError(f'CUDA requires exactly the production V6 settings: {actual}')
+
+
+def attach_count_head(model):
+    """Auxiliary countdown classifier on the answer-position state (step_count arm only)."""
+    head = nn.Linear(model.config.hidden_size, COUNT_CLASSES).to(next(model.parameters()).device)
+    head.weight.data.normal_(0, .02)
+    head.bias.data.zero_()
+    model.count_head = head
+    return head
 
 
 def train_update(model, optimizer, items, record, args, plan):
@@ -97,22 +113,31 @@ def train_update(model, optimizer, items, record, args, plan):
         raise ValueError('Runtime batch IDs differ from frozen plan')
     depth = record['depth']
     targets = {int(r): h for r, h in record['targets'].items()}
+    counts = {int(r): c for r, c in record.get('count_targets', {}).items()}
     if not targets or max(targets) > depth or any(h > item['row']['difficulty'] for h in targets.values() for item in items):
         raise ValueError('Supervised exits/hops exceed the unroll or the path')
+    if counts and (sorted(counts) != list(range(1, depth + 1)) or getattr(model, 'count_head', None) is None):
+        raise ValueError('Countdown targets require every exit 1..T and the countdown head')
     exits = sorted(targets)
     optimizer.zero_grad(set_to_none=True)
     for group in optimizer.param_groups:
         group['lr'] = record['lr']
-    total, per_exit, used = 0., {}, 0
+    total, per_exit, count_total, used = 0., {}, 0., 0
     for offset in range(0, len(items), args.micro_batch):
         micro = items[offset:offset + args.micro_batch]
         ids, mask, _ = collate_fixed(micro, args.pad_id, args.device, plan['padding_width'])
         hop_targets = torch.tensor([[item['hops'][h] for h in (targets[r] for r in exits)] for item in micro],
                                    dtype=torch.long, device=args.device)
         with amp(args.device):
-            logits = model(ids, mask, depths=sorted(set(exits) | {depth}))
-            losses = {r: F.cross_entropy(logits[r].float(), hop_targets[:, j]) for j, r in enumerate(exits)}
+            hidden = model(ids, mask, depths=sorted(set(exits) | set(counts) | {depth}), return_hidden=True)
+            losses = {r: F.cross_entropy(model.base.lm_head(hidden[r]).float(), hop_targets[:, j]) for j, r in enumerate(exits)}
             loss = sum(losses.values()) / len(exits)
+            if counts:
+                count_targets = torch.tensor([[min(max(item['row']['difficulty'] - r, 0), COUNT_CLASSES - 1) for r in sorted(counts)]
+                                              for item in micro], dtype=torch.long, device=args.device)
+                count_loss = sum(F.cross_entropy(model.count_head(hidden[r].float()), count_targets[:, j])
+                                 for j, r in enumerate(sorted(counts))) / len(counts)
+                loss = loss + count_loss
         if not bool(torch.isfinite(loss)):
             raise FloatingPointError('Nonfinite V6 loss')
         weight = len(micro) / len(items)
@@ -120,8 +145,10 @@ def train_update(model, optimizer, items, record, args, plan):
         total += float(loss.detach()) * weight
         for r, value in losses.items():
             per_exit[str(r)] = per_exit.get(str(r), 0.) + float(value.detach()) * weight
+        if counts:
+            count_total += float(count_loss.detach()) * weight
         used += ids.numel() * model.config.num_hidden_layers * 4 * depth
-        del logits, losses, loss
+        del hidden, losses, loss
     if used != record['compute_units']:
         raise AssertionError('Actual padded work differs from frozen plan')
     parameters = [p for p in model.parameters() if p.requires_grad]
@@ -129,7 +156,8 @@ def train_update(model, optimizer, items, record, args, plan):
         raise RuntimeError('Missing gradients for shared parameters')
     norm = float(torch.nn.utils.clip_grad_norm_(parameters, args.clip, error_if_nonfinite=True, foreach=False))
     optimizer.step()
-    return {'loss': total, 'per_exit_ce': per_exit, 'grad_norm': norm, 'lr': record['lr'], 'supervised_exits': exits}
+    return {'loss': total, 'per_exit_ce': per_exit, 'count_ce': count_total if counts else None, 'grad_norm': norm,
+            'lr': record['lr'], 'supervised_exits': exits}
 
 
 def _cycle_distance(edges, start, node):
@@ -151,8 +179,11 @@ def evaluate(model, encoded, args, depths, output_prefix, token_to_label):
     for offset in range(0, len(encoded), args.eval_batch):
         items = encoded[offset:offset + args.eval_batch]
         ids, mask, targets = collate_fixed(items, args.pad_id, args.device, max(len(i['ids']) for i in items) + 7 & ~7)
+        head = getattr(model, 'count_head', None)
         with amp(args.device):
-            logits = model(ids, mask, depths=list(depths))
+            hidden = model(ids, mask, depths=list(depths), return_hidden=True)
+            logits = {d: model.base.lm_head(h) for d, h in hidden.items()}
+            count_pred = {d: head(h.float()).argmax(-1).cpu().tolist() for d, h in hidden.items()} if head is not None else None
         predictions = {d: l.float().argmax(-1).cpu().tolist() for d, l in logits.items()}
         nll = {d: F.cross_entropy(l.float(), targets, reduction='none').cpu().tolist() for d, l in logits.items()}
         for j, item in enumerate(items):
@@ -173,8 +204,13 @@ def evaluate(model, encoded, args, depths, output_prefix, token_to_label):
                     landed = min(hits, key=lambda i: (abs(i - expected), i)) if hits else None
                 scores[str(d)] = {'correct': token == item['target'], 'prediction_token': token, 'nll': nll[d][j],
                                   'landed_hop': landed}
-            records.append({'id': row['id'], 'family': row['family'], 'difficulty': row['difficulty'],
-                            'answer': row['answer'], 'scores': scores})
+                if count_pred is not None:
+                    scores[str(d)]['count_pred'] = count_pred[d][j]
+            record = {'id': row['id'], 'family': row['family'], 'difficulty': row['difficulty'], 'answer': row['answer'], 'scores': scores}
+            if count_pred is not None:
+                stop = next((d for d in depths if count_pred[d][j] == 0), depths[-1])
+                record['self_stop'] = {'exit': stop, 'correct': scores[str(stop)]['correct'], 'exit_equals_d': stop == row['difficulty']}
+            records.append(record)
     groups = {}
     for r in records:
         for key in ('all', f'd{r["difficulty"]}'):
@@ -189,6 +225,11 @@ def evaluate(model, encoded, args, depths, output_prefix, token_to_label):
                                     'nll': sum(v['nll'] for v in values) / len(values),
                                     'landed_on_node_rate': len(landed) / len(values),
                                     'mean_landed_hop': sum(landed) / len(landed) if landed else None}
+        if rows and 'self_stop' in rows[0]:
+            stops = [r['self_stop'] for r in rows]
+            metrics[key]['self_stop'] = {'n': len(stops), 'accuracy': sum(s['correct'] for s in stops) / len(stops),
+                                         'mean_exit': sum(s['exit'] for s in stops) / len(stops),
+                                         'exit_equals_d': sum(s['exit_equals_d'] for s in stops) / len(stops)}
     result = {'evaluator_version': 'v6-node-1', 'seconds': time.monotonic() - start, 'count': len(records),
               'depths': list(depths), 'metrics': metrics}
     prefix = Path(output_prefix)
@@ -280,8 +321,10 @@ def _train(model, tokenizer, args, output, token_ids):
             return json.loads(Path(str(prefix) + '.json').read_text())
         summary = evaluate(model, dev, args, list(EVAL_DEPTHS), prefix, token_to_label)
         compact = {k: {t: round(v['accuracy'], 4) for t, v in g.items()} for k, g in summary['metrics'].items()}
+        if 'self_stop' in summary['metrics']['all']:
+            compact['self_stop'] = {k: summary['metrics'][k]['self_stop'] for k in summary['metrics'] if 'self_stop' in summary['metrics'][k]}
         log(output / 'metrics.jsonl', {'event': 'dev', 'update': update, 'compute_units': state['compute_units'], 'metrics': compact})
-        diagonal = {k: compact[k].get(k[1:]) for k in compact if k.startswith('d') and k[1:] in compact[k]}
+        diagonal = {k: compact[k].get(k[1:]) for k in compact if k.startswith('d') and isinstance(compact[k], dict) and k[1:] in compact[k]}
         print(json.dumps({'V6_DEV': {'arm': args.arm, 'update': update, 'diagonal_T_equals_d': diagonal, 'accuracy': compact}}), flush=True)
         return summary
 
@@ -364,14 +407,20 @@ def main():
     if args.command == 'train':
         if not args.plan_path:
             parser.error('train requires --plan-path')
+        if args.arm == 'step_count':
+            attach_count_head(model)
         train(model, tokenizer, args, token_ids)
     else:
         if args.checkpoint:
+            payload = torch.load(initializer_file(args.checkpoint), map_location='cpu', weights_only=True)
+            if any(k.startswith('count_head.') for k in payload['state_dict']):
+                attach_count_head(model)
             model.load_trainable(args.checkpoint)
         rows = encode_rows(load_rows(str(Path(args.data_dir) / args.eval_file)), tokenizer, token_ids, args.max_length)
         result = evaluate(model, rows, args, args.depths, args.output, {v: k for k, v in token_ids.items()})
         print(json.dumps({'count': result['count'], 'seconds': result['seconds'],
-                          'all': {t: round(v['accuracy'], 4) for t, v in result['metrics']['all'].items()}}), flush=True)
+                          'all': {t: round(v['accuracy'], 4) for t, v in result['metrics']['all'].items() if t != 'self_stop'},
+                          'self_stop': result['metrics']['all'].get('self_stop')}), flush=True)
 
 
 if __name__ == '__main__':
