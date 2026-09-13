@@ -56,17 +56,26 @@ def extract(model, encoded, args, exits):
 
 
 class Gate(nn.Module):
+    """Per-exit halting probability from the (feature-normalised) answer-position state.
+
+    Weights start at zero and the bias at logit(1/T_MAX), so the initial halting
+    distribution is spread over exits instead of saturating on raw Ouro states.
+    """
     def __init__(self, hidden, init_weight=None, init_bias=None):
         super().__init__()
+        self.norm = nn.LayerNorm(hidden, elementwise_affine=False)
         self.linear = nn.Linear(hidden, 1)
-        if init_weight is not None:
-            with torch.no_grad():
+        with torch.no_grad():
+            if init_weight is not None:
                 self.linear.weight.copy_(init_weight.reshape(1, -1).float())
                 self.linear.bias.copy_(init_bias.reshape(1).float())
+            else:
+                self.linear.weight.zero_()
+                self.linear.bias.fill_(float(torch.log(torch.tensor(1. / (T_MAX - 1)))))
 
     def halting(self, states):
         """[N, T, H] -> log p(stop at exit t) with forced stop at the last exit."""
-        g = torch.sigmoid(self.linear(states).squeeze(-1)).clamp(1e-6, 1 - 1e-6)
+        g = torch.sigmoid(self.linear(self.norm(states)).squeeze(-1)).clamp(1e-6, 1 - 1e-6)
         g = torch.cat([g[:, :-1], torch.ones_like(g[:, -1:])], 1)
         log_continue = torch.cumsum(torch.log1p(-g[:, :-1]), 1)
         log_prev = torch.cat([torch.zeros_like(log_continue[:, :1]), log_continue], 1)
