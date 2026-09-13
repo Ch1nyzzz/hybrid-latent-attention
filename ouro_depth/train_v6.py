@@ -29,6 +29,7 @@ from torch import nn
 
 EXTRA_SOURCE = ('v6_plan.py', 'train_v6.py', 'prepare_v6_data.py', 'PROTOCOL-v6.md')
 PRODUCTION = {'seed': 20260918, 'batch_size': 16, 'micro_batch': 8, 'num_layers': 24, 'trainable': 1_233_324_032}
+HEAD_LR_SCALE = 100.0
 
 
 def source_receipt(package_dir=None):
@@ -121,7 +122,7 @@ def train_update(model, optimizer, items, record, args, plan):
     exits = sorted(targets)
     optimizer.zero_grad(set_to_none=True)
     for group in optimizer.param_groups:
-        group['lr'] = record['lr']
+        group['lr'] = record['lr'] * group.get('lr_scale', 1.0)
     total, per_exit, count_total, used = 0., {}, 0., 0
     for offset in range(0, len(items), args.micro_batch):
         micro = items[offset:offset + args.micro_batch]
@@ -161,7 +162,7 @@ def train_update(model, optimizer, items, record, args, plan):
     norm = float(torch.nn.utils.clip_grad_norm_(parameters, args.clip, error_if_nonfinite=True, foreach=False))
     optimizer.step()
     return {'loss': total, 'per_exit_ce': per_exit, 'count_ce': count_total if counts else None, 'grad_norm': norm,
-            'lr': record['lr'], 'supervised_exits': exits}
+            'lr': record['lr'], 'head_lr': optimizer.param_groups[-1]['lr'] if counts else None, 'supervised_exits': exits}
 
 
 def _cycle_distance(edges, start, node):
@@ -301,7 +302,13 @@ def _train(model, tokenizer, args, output, token_ids):
         model.load_trainable(args.resume)
     elif initializer:
         model.load_trainable(initializer)
-    optimizer = torch.optim.AdamW(params, lr=plan['arms'][args.arm][0]['lr'], betas=(.9, .95), weight_decay=.01,
+    head = getattr(model, 'count_head', None)
+    head_ids = {id(p) for p in head.parameters()} if head is not None else set()
+    groups = [{'params': [p for p in params if id(p) not in head_ids], 'lr_scale': 1.0}]
+    if head_ids:
+        # A freshly initialised auxiliary head needs a much larger step than the pretrained body.
+        groups.append({'params': [p for p in params if id(p) in head_ids], 'lr_scale': HEAD_LR_SCALE})
+    optimizer = torch.optim.AdamW(groups, lr=plan['arms'][args.arm][0]['lr'], betas=(.9, .95), weight_decay=.01,
                                   foreach=False, fused=False)
     if saved:
         optimizer.load_state_dict(saved['optimizer'])
