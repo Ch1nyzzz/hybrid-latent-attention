@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Latent-cache job on trisol (verl-coding image). Env: MODE=stage1|probe|logit, plus STAGE1_ARGS / PROBE_ARGS / LOGIT_ARGS.
+# Latent-cache job on trisol (verl-coding image). Env: MODE=stage1|stage2|probe|logit, plus STAGE1_ARGS / STAGE2_ARGS / PROBE_ARGS / LOGIT_ARGS.
 # Datasets mounted under /trisol/input/datasets: code bundle (loop-scale-latent-code*.tar.gz), corpus (train.npy/dev.npy),
 # transformers 4.56.2 wheels. Model at /trisol/input/model.
 set -euo pipefail
@@ -26,6 +26,10 @@ case "${MODE:?MODE required}" in
     torchrun --standalone --nproc_per_node="$NGPU" -m ouro_depth.latent.train_stage1 --model-path "$MODEL" --data-dir "$CORPUS" --output "$OUT/stage1" ${STAGE1_ARGS:-} ;;
   probe)
     python -m ouro_depth.latent.probe_linear --model-path "$MODEL" --data-dir "$CORPUS" --output "$OUT/probe" ${PROBE_ARGS:-} ;;
+  stage2)  # end-to-end distillation from a stage-1 checkpoint (auxiliary model input) or fresh
+    STUDENT=${STUDENT:-$(find /trisol/input/models -name 'student-*.pt' 2>/dev/null | sort -V | tail -1)}
+    echo "student: ${STUDENT:-fresh}"
+    torchrun --standalone --nproc_per_node="$NGPU" -m ouro_depth.latent.train_stage2 --model-path "$MODEL" --data-dir "$CORPUS" --output "$OUT/stage2" ${STUDENT:+--student "$STUDENT"} ${STAGE2_ARGS:-} ;;
   logit)  # student checkpoint from an auxiliary model input (--model NAME:CODE -> /trisol/input/models/model-0)
     STUDENT=${STUDENT:-$(find /trisol/input/models -name 'student-*.pt' | sort -V | tail -1)}
     echo "student: $STUDENT"

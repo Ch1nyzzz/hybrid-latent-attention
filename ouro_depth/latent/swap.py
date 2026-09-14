@@ -19,6 +19,7 @@ class Swapped:
         self.model, self.student, self.exit_loop = model, student, exit_loop
         self.layers = model.model.layers[: model.config.num_hidden_layers]
         self.regs: list[Tensor | None] = [None] * len(self.layers)
+        self.last_attn: Tensor | None = None  # attention output of the most recent swapped call (stage-2 matching)
         self.originals = [l.self_attn.forward for l in self.layers]
         for i, l in enumerate(self.layers):
             if layers is None or i in layers:
@@ -58,6 +59,7 @@ class Swapped:
             logits = logits + torch.full((L, L), -1e4, device=h.device).triu(1)
             probs = F.softmax(logits, -1).to(h.dtype)
             out = attn.o_proj(sl.read_out(current_ut, probs, c))
+            self.last_attn = out
             return out, None
 
         return forward
