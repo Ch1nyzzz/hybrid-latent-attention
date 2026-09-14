@@ -23,7 +23,7 @@
 
 第三点不是自动得到的：早退 token 仅凭 `h_{1:τ}` 产生的 `c_j`，能否支持 `t > τ` 的 reader，是本项目的**核心 learning problem**。LLA 没有回答它，因为 LLA 的 `c` 由完整 cross-loop trajectory 离线压出。
 
-## 3. 与 LLA（arXiv 2511.20639）的关系
+## 3. 与 LLA（arXiv 2607.15456）的关系
 
 - **LLA 已证明**：cross-loop K/V trajectory 高度低秩，可用小 latent 表示；线性 absorption `q^T W c = (W^T q)^T c` 在无 RoPE 时成立并能加速（262k context 约 2.3×）。这两点**不是我们的 novelty**。
 - **LLA 已给出的负结果**：只保留某一个 loop 的 K/V（final-loop reuse）会严重失败。本仓库的 `vllm_kvshare/` 实验独立复现了同一现象：decode 期让 loop `r < T-1` 读最后一轮 KV，即使 own-loop 窗口开到 2048，长生成仍崩溃（AIME24 −12 到 −15pp，截断 85–90%；见 `vllm_kvshare/README.md` 与 memory）。结论一致：**单个 loop 的 state 不是 canonical state**，但 trajectory 可压缩。
