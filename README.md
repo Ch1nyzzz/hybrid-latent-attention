@@ -4,7 +4,7 @@
 
 本项目研究如何通过训练，让 Ouro、Huginn 等共享参数的循环模型在增加循环时继续推进推理。当前首要目标是：经过训练，同一个模型在独立难题上使用更多循环，能够获得可验证的任务收益。长期目标是简单题少循环、难题多循环的自适应计算。
 
-研究方向以 [RESEARCH_OBJECTIVE.md](RESEARCH_OBJECTIVE.md) 为准。单纯给现成模型增加推理次数、只把接口改成可调循环、或者只完成简单题适配，都不能替代这个训练目标。
+研究方向以 [RESEARCH_OBJECTIVE.md](RESEARCH_OBJECTIVE.md) 为准；第二条并列研究线（与循环深度无关、无需重建的 loop-invariant latent cache）见 [RESEARCH_OBJECTIVE-latent-cache.md](RESEARCH_OBJECTIVE-latent-cache.md)。单纯给现成模型增加推理次数、只把接口改成可调循环、或者只完成简单题适配，都不能替代这个训练目标。
 
 ## 当前进展
 

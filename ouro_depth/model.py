@@ -2,7 +2,8 @@
 
 Depth counts complete passes through the shared decoder stack. Every pass feeds
 its final RMS-normalized state into the next pass, as in the official model.
-Only the last valid prompt position is projected to the vocabulary.
+Only the last valid prompt position is projected to the vocabulary unless
+``all_positions`` asks for every position (sequence-level training, V10).
 """
 
 from __future__ import annotations
@@ -117,6 +118,7 @@ class OuroDepthModel(nn.Module):
         depths: list[int],
         backprop_loops: int | None = None,
         return_hidden: bool = False,
+        all_positions: bool = False,
     ) -> dict[int, Tensor]:
         if not depths or any(type(depth) is not int or depth < 1 for depth in depths):
             raise ValueError("depths must contain positive integers")
@@ -170,7 +172,7 @@ class OuroDepthModel(nn.Module):
                 hidden = body.norm(hidden)
             depth = current_loop + 1
             if depth in requested:
-                final = hidden[batch_indices, last_indices]
+                final = hidden if all_positions else hidden[batch_indices, last_indices]
                 outputs[depth] = final if return_hidden else self.base.lm_head(final)
         return outputs
 
