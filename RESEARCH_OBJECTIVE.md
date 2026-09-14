@@ -1,68 +1,104 @@
-# 研究目标：通过训练，让更深循环学会更强推理
+# 研究目标：与循环深度无关、无需重建的 loop-invariant latent cache
 
-2026-09-13，依据用户在本项目中的明确澄清。本文约束后续研究方向；历史已冻结协议和结果不作追溯修改。
+2026-09-14 定稿，依据本日讨论。本文是仓库唯一的研究方向；此前"训练更深循环学会更强推理"一线（V1–V10、Huginn）的代码与报告已于同日清理出工作区，完整保留在 git 历史（提交 `62f4130` 及之前）。
 
-用户的原意是：
+## 1. 一句话目标
 
-> 模型更深循环带来更强推理这件事情是需要训练的。
+> **Decouple KV-cache representation from recurrent depth: each token stores a fixed-size, loop-invariant latent memory that can be directly queried by arbitrary recurrent depths without materializing loop-specific KV states.**
 
-## 核心问题
+目标**不是**"比 LLA 压得更多"。目标是让 looped 模型的 cache 满足两个条件，且必须同时满足：
 
-我们要研究如何训练共享参数的循环模块，使新增循环在已有状态上继续完成有用的推理计算。例如：怎样使第 33–64 轮学会继续解决前 32 轮尚未解决的难题。
+1. **形状与循环数无关。** 普通 looped Transformer 每个历史 token 存 `{K_1,V_1,…,K_T,V_T}`，`M_cache = O(T·d)`；我们要 `C_j = (c_j^K, c_j^V)`，维度 `r` 不随 `T` 增长，`M_cache = O(r)`。
+2. **attention 直接消费 `c_j`，不做 `c_j → K_{j,t}, V_{j,t}` 的重建。** loop-specific 计算全部移到 Q/O 侧：`q'_{i,t} = W_t^T q_{i,t}` 一次变换后对整个 cache 做标准 attention；V 侧同理 `o_{i,t} = B_t (Σ_j a_ij c_j^V)`，即对聚合后的单个向量做投影，而不是对 N 个历史 token 重建。
 
-第一阶段目标是让训练后的同一个模型，在独立难题上增加循环能获得可验证的任务收益。最终愿景是在此能力基础上学习自适应停止：简单问题少想，困难问题多想。第一阶段不要求先实现停止策略。
+只满足 1 不满足 2 就是 LLA 主方案：省了显存，但 decode 仍有 reconstruction 瓶颈。
 
-仅给已有模型多跑几轮、发现个别出口偶尔更好，不能证明这项能力已经通过我们的训练获得。循环接口可调、梯度有限、loss 下降和简单任务适配成功，也都不是核心研究结果。
+## 2. 三个 consequence（也是三个评测维度）
 
-## 数学对象与需要区分的量
+| 性质 | 来源 | 对应指标 |
+|---|---|---|
+| **并发 / memory capacity** | `O(T·d) → O(r)` | 固定 KV 预算下的最大并发序列数；每 token cache 字节 |
+| **decode 吞吐** | 没有 `c → K_t, V_t` 重建，每 loop 只有一次 query 变换 + 一次 attention GEMM | tok/s，对比 exact-KV 与 LLA reconstruct 路径 |
+| **adaptive recurrent depth** | 历史 token 无论在第 `τ_j` 轮退出，写入 cache 的接口都是同一个 `c_j`；当前 token 跑到第 `t` 轮只需 `q'_{i,t}` 去读 | writer-depth × reader-depth 矩阵（见 §6） |
 
-以示意形式表示循环模型：
+第三点不是自动得到的：早退 token 仅凭 `h_{1:τ}` 产生的 `c_j`，能否支持 `t > τ` 的 reader，是本项目的**核心 learning problem**。LLA 没有回答它，因为 LLA 的 `c` 由完整 cross-loop trajectory 离线压出。
 
-```text
-e = Pθ(x)
-h[r+1] = Fθ(h[r], e)
-pθ(y | x, r) = Headθ(h[r])
+## 3. 与 LLA（arXiv 2511.20639）的关系
+
+- **LLA 已证明**：cross-loop K/V trajectory 高度低秩，可用小 latent 表示；线性 absorption `q^T W c = (W^T q)^T c` 在无 RoPE 时成立并能加速（262k context 约 2.3×）。这两点**不是我们的 novelty**。
+- **LLA 已给出的负结果**：只保留某一个 loop 的 K/V（final-loop reuse）会严重失败。本仓库的 `vllm_kvshare/` 实验独立复现了同一现象：decode 期让 loop `r < T-1` 读最后一轮 KV，即使 own-loop 窗口开到 2048，长生成仍崩溃（AIME24 −12 到 −15pp，截断 85–90%；见 `vllm_kvshare/README.md` 与 memory）。结论一致：**单个 loop 的 state 不是 canonical state**，但 trajectory 可压缩。
+- **LLA 没解决的**：完全不重建的 latent attention 如何兼容 RoPE。它用 MLA 式 decoupled RoPE + query adapter 做了尝试，4× 压缩时 KL 从 reconstruct 路径的约 0.059 退化到约 0.30–0.55，作者将其定位为 implementation path，不是主结果。
+
+因此论文的新核心必须落在两处：**(a) causal / early-exit-compatible 的 loop-invariant `c_j` 如何在线构造；(b) RoPE-compatible 的 direct read。**
+
+## 4. 为什么 RoPE 是障碍（精确表述）
+
+普通 LLM 对历史 token `j` 只有一个 `W_K`，写 cache 时做一次 `R_j W_K h_j` 即永久有效，RoPE 不构成 cache 障碍。looped 模型的冲突是 **position dependency × loop-dependent projection**：
+
+```
+s_ij,t = (R_i q_{i,t})^T R_j W_t c_j = q_{i,t}^T R_{j-i} W_t c_j
 ```
 
-具体实现是否每轮重新注入输入，应以各架构为准；上式不声称 Ouro 与 Huginn 的实现相同。
+数学上仍是矩阵乘法，但 `R_{j-i} W_t` 依赖每个历史位置 `j`，且一般 `R_j W_t ≠ W_t R_j`，所以无法写成一个与 `j` 无关的 `q'_{i,t}` 去读整个 cache。两条 naive 出路——per-key 的 `q'_{i,t,j} = W_t^T R_{i-j} q`，或现场算 `R_j W_t c_j`——都等价于重新引入 N 个历史 token 的 reconstruction。真正要找的是 latent 空间的位置算子 `R̃_j`，使 `R_j W_t = W_t R̃_j`，那样写 cache 时只做一次 `c̄_j = R̃_j c_j`，query 侧只做一次 `q' = W_t^T R_i q`。这对 `W_t` 施加强等变约束，是 §8 第二阶段的理论问题。
 
-对固定的独立难题分布 D，定义：
+## 5. 第一版架构：Recurrent Memory Register + MLA 式 Decoupled RoPE
 
-```text
-Aθ(r) = E[(x,y) ~ D] [ predictionθ(x,r) == y ]
-Δθ(rs,rl) = Aθ(rl) - Aθ(rs),  rl > rs
+第一版**放弃保持 full-RoPE 语义**，先证明 canonical memory 存在且可用。
+
+```
+写侧（历史 token j，在线、因果、固定大小）
+  c_j^(0)   = E_0(h_{j,pre})                    # prelude 输出初始化
+  c_j^(t)   = F_φ(c_j^(t-1), h_{j,t})            # 每轮往固定大小寄存器里写，gated 更新
+  c_j       = c_j^(τ_j)                          # 在第 τ_j 轮退出，接口与 τ_j 无关
+  k_j^R     = P_R(c_j),   k̄_j^R = R_j k_j^R      # 唯一的、loop-invariant 的小 RoPE key
+  持久 cache = { c_j^K, c_j^V, k̄_j^R }           # 没有 loop 维度
+
+读侧（当前 token i，第 t 轮，loop-specific 全在 Q/O）
+  q_{i,t}^C = A_t h_{i,t}                        # content 分支，NoPE
+  q̄_{i,t}^R = R_i Q_t^R(h_{i,t})                # position 分支
+  s_ij,t    = (q_{i,t}^C)^T c_j^K + (q̄_{i,t}^R)^T k̄_j^R
+  z_{i,t}   = Σ_j a_ij,t c_j^V
+  o_{i,t}   = B_t z_{i,t}
 ```
 
-我们希望训练得到 θ*，使事先规定的较深出口在难题上有正的 Δθ*，且更深出口本身的绝对正确率有改善。不能通过降低浅出口能力来制造正差值。应保留训练前权重、浅循环训练控制和各自的深出口表现，帮助判断收益来自哪里。
+设计约束：
 
-这不等于要求每一道题、每一个整数循环深度都严格单调变好。先在规定的难度组和循环范围内建立可重复的平均收益，再扩展范围。
+- **RoPE 分支也必须 loop-invariant**：`k_j^R` 只能由 `c_j`（或 `h_{j,pre}`）产生一次，不能是 `P_t(h_{j,t})`，否则只是把大 K 缩成小 K，loop 维度没有消掉。
+- **不强迫 `c^(1) = c^(8)`**：需要的是 functional invariance（对任意 reader 深度的 attention 行为等价），不是 representation invariance。
+- **`F_φ` 是在线因果构造**，这是与 LLA 离线 `(K_1..K_T) → c` 的本质区别，也是 early exit 可行的前提。
+- 训练目标以 attention 行为为主，不拟合 K：`L = λ1·KL(A*_t ‖ Â_t) + λ2·‖o*_{i,t} − ô_{i,t}‖² + λ3·KL(p_teacher ‖ p_latent)`。
+- 不能 zero-shot 套在 Ouro 上：Ouro 按 full-dimensional RoPE 训练，改成 NoPE content + 小 RoPE 分支后 attention geometry 已变，必须做 attention distillation / continual training。
 
-## 训练方法是主要研究变量
+## 6. 第一阶段实验（先做，决定项目生死）
 
-- **训练深度与课程：**训练中真正经历更深的状态；研究固定深度、混合深度和逐步增加深度的不同作用。
-- **有效梯度窗口：**区分前向循环数 R 与参与反传的循环数 K。Huginn 的 R64/K8 仅通过最后八轮反传，不等于完整 64 轮 BPTT。需要验证后续循环是否获得足以学习有用更新的信号。
-- **监督位置与目标：**比较末出口监督、选定多出口监督或其他针对后续计算的训练目标。不能预先认定多出口监督必然更好；它也可能使各出口趋于相同答案。
-- **难度与深度关系：**难题应给新增计算留下实际可改善空间；若同时调整题目难度和循环深度，需要对照区分两种变化。
-- **状态行为：**检查新增循环是否产生与任务相关的改进，而不是重复输出、破坏已有答案或只适应答案字母先验。输出曲线和梯度范数不能单独证明内部算法。
+**问题**：早期 loop 形成的 canonical memory 能否被更深 loop 正确读取？
 
-这些是待检验的训练假设，不是已经证明的配方。后续每个实验应明确一个主假设、训练信号、对照及能够否定该假设的结果。
+1. 冻结 Ouro-1.4B（revision 574fa66…；16 头 × 128 维、无 GQA、24 层、预训练 T=4），在真实文本上收集 `h_{j,1:T}, K_{j,1:T}, V_{j,1:T}`（T=8）。
+2. 训练 `E_0, F_φ, A_t, B_t, P_R, Q_t^R`（body 冻结），随机截断 writer 深度 `τ ~ {1..8}`、随机 reader 深度 `t ~ {1..8}`。
+3. 输出 **writer τ × reader t 矩阵**（attention KL / output MSE / 端到端 logit KL），重点看右上角 `τ < t`。
+4. 同时报告每 token cache 字节与 `r` 的关系。
 
-## 如何评估进展
+**预先固定的判断**（按 attention KL，对照 LLA reconstruct 路径的约 0.06 与 decoupled 路径的约 0.30）：
 
-首先比较训练前后，同一个模型的“循环次数—难题准确率”曲线；同时报告深出口绝对准确率、配对的错→对/对→错、简单题保持情况和计算成本。
+- **成立**：`τ = 2` 的 `c` 支持 `t = 6,7,8` 的 reader，KL 与 `τ = 8` 同列相差 ≤ 2×，且端到端 MATH500 保住 exact-KV 的 ≥ 95%。
+- **部分成立**：对角线与下三角（`τ ≥ t`）成立、右上角不成立。则 canonical memory 存在但不支持 adaptive depth；项目退化为"无重建的 LLA"，仍有吞吐意义，但 adaptive depth 一项撤回。
+- **不成立**：`r` 与 `T·d` 同量级才能达到上述 KL。则"loop-invariant canonical cache"假设本身错误，不再进入 §8。
 
-浅循环训练对照用于判断额外循环的能力是否由训练方案获得。根据实验问题分别采用同曝光或同计算量对照，并如实说明不能同时匹配的量。计算代理不能称为实测 FLOPs。
+对照臂（形成 ablation）：A. prelude-only `c_j = E(h_{j,pre})`（对应 CART 的 frozen memory 思路，预期 variable-depth 泛化差）；B. final-hidden `c_j = E(h_{j,τ})`（预期重复 final-loop reuse 的失败）；C. 累积寄存器（主方案）。
 
-“必须击败所有基线在所有出口中的最佳结果”不是开展能力学习研究的先决条件。基础训练能力、训练归因、效率优势和最佳性能属于不同层次，应分别回答。有限但明确的训练收益可以作为阶段性结果保留，不能夸大为全面优越。
+## 7. 与本仓库现有结果的衔接
 
-独立确认之前固定主要难题、出口和比较方式。不能事后挑选有利出口或损坏浅出口来制造结论。探索 DEV 与独立 TEST 的证据等级分开，既有负结果完整保留。
+- 每 token 每层每 loop K+V = 2×16×128×2 B = 8 KB；24 层 = 192 KB/loop；T=8 时 1.5 MB/token，8K 序列约 12.6 GB，与 `vllm_kvshare` 实测的 12.8 GB 一致。`r` 的目标量级是让 8K 序列落到 1–2 GB 且不随 T 变。
+- `vllm_kvshare/` 的 decode 期 last-loop 共享是本目标的**负对照**：它证明了"用某一轮代替全部轮"不行，且 vLLM 侧 hybrid KV 管理（R-SWA manager、三段 FA2 合并）的工程路径可复用于新 cache 的 serving 实现。
+- 未训练的 T=8 把 AIME24 从 22.9 砍到 10.6（exact KV，2026-09-14 实测）；蒸馏 teacher 先用 base 在 T=4 做，T=8 teacher 需另行训练后再用。
+- Ouro 自带 `early_exit_gate`（`vendor/modeling_ouro.py:513`），adaptive depth 评测时以它决定 `τ_j`。
 
-## 当前边界与下一步
+## 8. 第二阶段（第一阶段成立后）
 
-既有 Ouro 实验包含实际深循环训练，但尚未建立我们要的可靠训练归因。浅训练模型增加推理循环后的 DEV 收益是有价值的线索，不是本目标已经完成。
+在 latent 空间寻找 `R̃_j` 使 `R_j W_t = W_t R̃_j`，恢复 full-RoPE 语义的 direct read：`c̄_j = R̃_j c_j`、`q' = W_t^T R_i q`、`s = q'^T c̄_j`。标准 RoPE 的各 2D 频率对是不同表示，任意 SVD 基一般不满足该等变性；这是论文可能的核心数学贡献，也可能证明为不可行，届时 §5 的 decoupled 版本即为最终方案。
 
-Huginn 上一轮仅在 R32/K8 做简单任务适配。最终 256 步、4096 个样本后，一跳/两跳在 T32/T64 均为 12.5%，全部预测 F。尚未训练出基本任务辨别能力，不能把这一轮当成深循环训练主实验。
+## 9. 不属于本目标的事
 
-下一项候选工作是小规模重复拟合诊断，先确认任务可学和训练信号有效，再单独制定训练更深循环的实验。已有 `HUGINN-DEPTH-EXPERIMENT-DRAFT.md` 与配套代码是未采用的控制实验准备；未来方法需要按本文目标重新定稿，不能把旧草案直接当作已获验证的训练方案。
-
-本文没有启动训练、追加旧实验预算、解封 TEST 或改变已经完成的结果。
+- 不追求比 LLA 更高的压缩比；`r` 只要让 cache 与 `T` 无关即可。
+- 不把 `vllm_kvshare` 的 shared 模式当作本目标的实现；它是被否定的方案。
+- 第一阶段不训练 Ouro body，不解封 AIME25 / HMMT / BeyondAIME 作为确认集之外的用途。

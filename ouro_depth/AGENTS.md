@@ -1,11 +1,10 @@
 # Research direction
 
-Before proposing or changing training experiments, read `../RESEARCH_OBJECTIVE.md`.
+Before proposing code or experiments, read `../RESEARCH_OBJECTIVE.md`.
 
-- The central task is to **train** useful additional recurrent computation: later loops should learn to improve hard-task solutions from earlier states.
-- Do not substitute inference-only depth sweeps, an adjustable-loop interface, finite gradients, or easy-task adaptation for this training objective.
-- Distinguish forward depth R, gradient window K, supervision exits, task difficulty, and actual evidence of task improvement.
-- Report within-model depth gains, absolute performance, training attribution, and compute efficiency separately. Do not require a universal best-baseline victory before investigating whether the capability can be learned.
-- Preserve earlier frozen protocols and negative findings. A new research clarification must not retroactively change their outcomes.
-- The current Huginn F32/F64 tools are unadopted preparation; the failed R32/K8 adaptation is not a completed deeper-training experiment.
-- Keep `sources/`, weights, raw datasets, per-question predictions, caches, and runtime logs out of Git. Preserve them in their existing local or GPU archives.
+- The goal is a per-token latent cache whose size is independent of recurrent depth **and** that attention consumes directly, with no `c -> K_t, V_t` reconstruction. Satisfying only the first is LLA's main path, not our result.
+- Loop-specific computation belongs on the Q/O side. Anything stored per history token (content latent, positional key) must be loop-invariant; a per-loop small key merely shrinks the problem.
+- The core learning problem is writer depth `τ` < reader depth `t`. Report the full `τ × t` matrix; do not average it away.
+- Optimize attention/output/logit behaviour, not `‖K − K̂‖`.
+- `shared_decode_cache.py` / `vllm_kvshare/` are the negative control (last-loop sharing collapses long generations). Reuse their serving plumbing; do not present them as the method.
+- Keep weights, datasets, per-sample outputs and logs out of Git.

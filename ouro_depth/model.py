@@ -3,7 +3,7 @@
 Depth counts complete passes through the shared decoder stack. Every pass feeds
 its final RMS-normalized state into the next pass, as in the official model.
 Only the last valid prompt position is projected to the vocabulary unless
-``all_positions`` asks for every position (sequence-level training, V10).
+``all_positions`` asks for every position.
 """
 
 from __future__ import annotations
