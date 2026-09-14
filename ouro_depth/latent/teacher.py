@@ -5,16 +5,13 @@ from __future__ import annotations
 import torch
 from torch import Tensor, nn
 
-from ..vendor.modeling_ouro import OuroForCausalLM
 from .register import apply_rope
+from .vendor_model import load_teacher
 
 
 class Teacher:
     def __init__(self, model_path: str, loops: int, device: torch.device, dtype=torch.bfloat16):
-        self.model = OuroForCausalLM.from_pretrained(model_path, torch_dtype=dtype, attn_implementation="sdpa" if device.type == "cuda" else "eager").to(device).eval()
-        self.model.requires_grad_(False)
-        self.model.config.total_ut_steps = loops
-        self.model.model.total_ut_steps = loops
+        self.model = load_teacher(model_path, loops, device, dtype)
         self.loops = loops
         self.cfg = self.model.config
         self.layers = self.model.model.layers[: self.cfg.num_hidden_layers]
