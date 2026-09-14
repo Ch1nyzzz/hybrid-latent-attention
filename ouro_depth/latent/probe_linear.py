@@ -69,7 +69,7 @@ def main():
                         kh = yh[:, t * 2 * Dk: t * 2 * Dk + Dk].view(B, L, -1, cfg.head_dim).transpose(1, 2)
                         vh = yh[:, t * 2 * Dk + Dk: (t + 1) * 2 * Dk].view(B, L, -1, cfg.head_dim).transpose(1, 2)
                         yt = y[:, t * 2 * Dk: (t + 1) * 2 * Dk]; yp = yh[:, t * 2 * Dk: (t + 1) * 2 * Dk]
-                        r2[l, tau, t] += 1 - ((yt - yp) ** 2).sum() / ((yt - yt.mean(0)) ** 2).sum()
+                        r2[l, tau, t] += (1 - ((yt - yp) ** 2).sum() / ((yt - yt.mean(0)) ** 2).sum()).cpu()
                         q, k, v = teacher.qkv(l, teacher.h_in[l][t], cos, sin)
                         tl = F.log_softmax((q @ k.transpose(-1, -2)).float() * attn.scaling + bias, -1)
                         sl = F.log_softmax((q @ apply_rope(kh.to(q.dtype), cos, sin).transpose(-1, -2)).float() * attn.scaling + bias, -1)

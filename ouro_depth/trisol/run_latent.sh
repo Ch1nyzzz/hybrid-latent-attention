@@ -7,7 +7,7 @@ MODEL=/trisol/input/model
 OUT=${TRISOL_OUTPUT_DIR:-/trisol/output}
 WORK=/work/loop_scale
 mkdir -p "$WORK" "$OUT"
-BUNDLE=$(find /trisol/input/datasets -name 'loop-scale-latent-code*.tar.gz' | head -1)
+BUNDLE=${BUNDLE:-$(find /trisol/input/datasets /work -maxdepth 3 -name 'loop-scale-latent-code*.tar.gz' 2>/dev/null | head -1)}
 echo "bundle: $BUNDLE"; tar xzf "$BUNDLE" -C "$WORK"
 CORPUS=$(dirname "$(find /trisol/input/datasets -name 'train.npy' | head -1)")
 echo "corpus: $CORPUS"; cat "$CORPUS/manifest.json"
