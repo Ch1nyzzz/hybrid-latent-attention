@@ -10,7 +10,7 @@ import torch
 from torch import Tensor
 from torch.nn import functional as F
 
-from .register import LatentStudent, apply_rope, rope_subset
+from .register import LatentStudent, apply_rope
 
 
 class Swapped:
@@ -34,7 +34,6 @@ class Swapped:
 
         def forward(hidden_states, position_embeddings, attention_mask=None, current_ut: int = 0, **_):
             cos, sin = position_embeddings
-            cos64, sin64 = rope_subset(cos, sin, sl.d_rope)
             B, L, _ = hidden_states.shape
             h = hidden_states
             # ---- write: lockstep register update, frozen after exit_loop
@@ -50,11 +49,10 @@ class Swapped:
                     c = (1 - g) * prev + g * u
                 self.regs[i] = c
             c = self.regs[i]
-            kr = sl.positional_keys(c.unsqueeze(0), cos64, sin64)[0]
             # ---- read
             q = attn.q_proj(h).view(B, L, -1, attn.head_dim).transpose(1, 2)
             q = apply_rope(q, cos, sin)
-            logits = sl.scores(current_ut, q, h, c, kr, cos64, sin64).float()
+            logits = sl.scores(current_ut, q, h, c, cos, sin).float()
             logits = logits + torch.full((L, L), -1e4, device=h.device).triu(1)
             probs = F.softmax(logits, -1).to(h.dtype)
             out = attn.o_proj(sl.read_out(current_ut, probs, c))

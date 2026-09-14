@@ -18,7 +18,7 @@ import torch.distributed as dist
 from torch import Tensor
 from torch.nn import functional as F
 
-from .register import LatentStudent, rope_subset
+from .register import LatentStudent
 from .teacher import Teacher
 
 
@@ -27,6 +27,8 @@ def parse():
     p.add_argument("--model-path", required=True); p.add_argument("--data-dir", required=True); p.add_argument("--output", required=True)
     p.add_argument("--loops", type=int, default=4); p.add_argument("--rank", type=int, default=512); p.add_argument("--d-rope", type=int, default=64)
     p.add_argument("--writer", default="register", choices=["register", "final", "first"])
+    p.add_argument("--rank-v", type=int, default=0, help="separate V latent size (0 = share the K latent, MLA-style)")
+    p.add_argument("--pos", default="decoupled", choices=["decoupled", "latent"], help="K positional scheme")
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--accum", type=int, default=1)
     p.add_argument("--steps", type=int, default=0, help="0 = one pass over the training blocks")
     p.add_argument("--lr", type=float, default=1e-3); p.add_argument("--warmup", type=int, default=50); p.add_argument("--weight-decay", type=float, default=0.01)
@@ -37,15 +39,14 @@ def parse():
     return p.parse_args()
 
 
-def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, cos64, sin64, bias, writer_depth: Tensor | None, tau_fixed: int | None,
+def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer_depth: Tensor | None, tau_fixed: int | None,
                  kl_w: float, out_w: float, backward: bool) -> dict[str, list[float]]:
     """One layer, all reader loops. writer_depth: (T, B, L) long in [0, T) per reader loop and token, or None with tau_fixed."""
     h_loops = teacher.h_in[l]
     T = len(h_loops)
     dev_type = h_loops[0].device.type
     with torch.autocast(dev_type, dtype=torch.bfloat16):
-        regs = student_layer.write(h_loops)                    # (T, B, L, r)
-        krs = student_layer.positional_keys(regs, cos64, sin64)  # (T, B, L, d_rope)
+        regs = student_layer.write(h_loops)                    # (T, B, L, rank+rank_v)
     kls, outs = [], []
     for t in range(T):
         h = h_loops[t]
@@ -55,13 +56,12 @@ def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, cos64, sin64
             t_logp = F.log_softmax(t_logits, -1); del t_logits
             t_out = teacher.out[l][t].float()
         if writer_depth is None:
-            c_read, kr_read = regs[tau_fixed], krs[tau_fixed]
+            c_read = regs[tau_fixed]
         else:
             idx = writer_depth[t]                                                # (B, L)
             c_read = torch.gather(regs, 0, idx[None, :, :, None].expand(1, *idx.shape, regs.shape[-1]))[0]
-            kr_read = torch.gather(krs, 0, idx[None, :, :, None].expand(1, *idx.shape, krs.shape[-1]))[0]
         with torch.autocast(dev_type, dtype=torch.bfloat16):
-            s_logits = student_layer.scores(t, q, h, c_read, kr_read, cos64, sin64)
+            s_logits = student_layer.scores(t, q, h, c_read, cos, sin)
         s_logp = F.log_softmax(s_logits.float() + bias, -1); del s_logits
         kl = (t_logp.exp() * (t_logp - s_logp)).sum(-1).mean()
         with torch.autocast(dev_type, dtype=torch.bfloat16):
@@ -82,10 +82,10 @@ def eval_matrix(student, teacher, blocks: np.ndarray, args, device, mb: int) -> 
     for i in range(0, len(blocks), mb):
         ids = torch.from_numpy(blocks[i:i + mb].astype(np.int64)).to(device)
         teacher.run(ids)
-        cos, sin = teacher.pos; cos64, sin64 = rope_subset(cos, sin, args.d_rope); bias = Teacher.causal_bias(ids.shape[1], device)
+        cos, sin = teacher.pos; bias = Teacher.causal_bias(ids.shape[1], device)
         for l in range(nL):
             for tau in range(T):
-                r = layer_losses(student.layers[l], teacher, l, cos, sin, cos64, sin64, bias, None, tau, 0, 0, backward=False)
+                r = layer_losses(student.layers[l], teacher, l, cos, sin, bias, None, tau, 0, 0, backward=False)
                 kl[l, tau] += torch.tensor(r["kl"], device=device); out[l, tau] += torch.tensor(r["out"], device=device)
         n += 1
     if dist.is_initialized():
@@ -110,7 +110,8 @@ def main():
 
     teacher = Teacher(args.model_path, args.loops, device)
     cfg = teacher.cfg
-    student = LatentStudent(cfg.num_hidden_layers, cfg.hidden_size, cfg.num_attention_heads, cfg.head_dim, args.loops, args.rank, args.d_rope, args.writer).to(device)
+    student = LatentStudent(cfg.num_hidden_layers, cfg.hidden_size, cfg.num_attention_heads, cfg.head_dim, args.loops, args.rank, args.d_rope,
+                            args.writer, args.rank_v, args.pos).to(device)
     params = [p for p in student.parameters()]
     n_params = sum(p.numel() for p in params)
     if rank == 0:
@@ -150,12 +151,12 @@ def main():
             if len(idx) < mb: idx = np.resize(idx, mb)
             ids = torch.from_numpy(train[np.sort(idx)].astype(np.int64)).to(device)
             teacher.run(ids)
-            cos, sin = teacher.pos; cos64, sin64 = rope_subset(cos, sin, args.d_rope); bias = Teacher.causal_bias(ids.shape[1], device)
+            cos, sin = teacher.pos; bias = Teacher.causal_bias(ids.shape[1], device)
             B, L = ids.shape
             lock = torch.rand(T, B, L, generator=gen, device=device) < args.p_lockstep
             wd = torch.where(lock, torch.arange(T, device=device)[:, None, None].expand(T, B, L), torch.randint(0, T, (T, B, L), generator=gen, device=device))
             for l in range(cfg.num_hidden_layers):
-                r = layer_losses(student.layers[l], teacher, l, cos, sin, cos64, sin64, bias, wd, None, args.kl_weight / (args.accum * cfg.num_hidden_layers), args.out_weight / (args.accum * cfg.num_hidden_layers), backward=True)
+                r = layer_losses(student.layers[l], teacher, l, cos, sin, bias, wd, None, args.kl_weight / (args.accum * cfg.num_hidden_layers), args.out_weight / (args.accum * cfg.num_hidden_layers), backward=True)
                 agg["kl"] += np.array(r["kl"]) / (args.accum * cfg.num_hidden_layers); agg["out"] += np.array(r["out"]) / (args.accum * cfg.num_hidden_layers)
         if world > 1:
             for p in params:
