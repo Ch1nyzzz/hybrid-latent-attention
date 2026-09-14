@@ -69,22 +69,23 @@ s_ij,t = (R_i q_{i,t})^T R_j W_t c_j = q_{i,t}^T R_{j-i} W_t c_j
 - 训练目标以 attention 行为为主，不拟合 K：`L = λ1·KL(A*_t ‖ Â_t) + λ2·‖o*_{i,t} − ô_{i,t}‖² + λ3·KL(p_teacher ‖ p_latent)`。
 - 不能 zero-shot 套在 Ouro 上：Ouro 按 full-dimensional RoPE 训练，改成 NoPE content + 小 RoPE 分支后 attention geometry 已变，必须做 attention distillation / continual training。
 
-## 6. 第一阶段实验（先做，决定项目生死）
+## 6. 第一阶段实验（2026-09-14 已在 trisol 启动）
 
 **问题**：早期 loop 形成的 canonical memory 能否被更深 loop 正确读取？
 
-1. 冻结 Ouro-1.4B（revision 574fa66…；16 头 × 128 维、无 GQA、24 层、预训练 T=4），在真实文本上收集 `h_{j,1:T}, K_{j,1:T}, V_{j,1:T}`（T=8）。
-2. 训练 `E_0, F_φ, A_t, B_t, P_R, Q_t^R`（body 冻结），随机截断 writer 深度 `τ ~ {1..8}`、随机 reader 深度 `t ~ {1..8}`。
-3. 输出 **writer τ × reader t 矩阵**（attention KL / output MSE / 端到端 logit KL），重点看右上角 `τ < t`。
-4. 同时报告每 token cache 字节与 `r` 的关系。
+Teacher 只能是 base Ouro-1.4B 在预训练深度 **T=4**（T=8 是外推，AIME24 从 22.9 掉到 10.6），矩阵为 4×4；T=8 的矩阵等有 T=8 训练过的模型再补。Ouro 官方的 early exit 只选择送 lm_head 的 hidden，所有 token 所有轮的 K/V 都照算，所以 teacher 里没有"历史 token 真早退"的 ground truth；右上角 `τ < t` 的目标定义为：用 token 自己前 τ 轮构造的 `c`，逼近 teacher 全深度 reader 的 attention 行为。数据不落盘：teacher 在线前向（钩子取每层每轮的 attention 输入与输出），student 同步算 loss。语料 99M token（OpenR1 数学轨迹 60% + fineweb-edu 40%，2048 token 块）。
 
-**预先固定的判断**（按 attention KL，对照 LLA reconstruct 路径的约 0.06 与 decoupled 路径的约 0.30）：
+**Step 0，线性探针**（`ouro_depth/latent/probe_linear.py`，1 GPU）：逐层 ridge 从 `concat(h_1..h_τ)` 预测 `k_proj(h_t), v_proj(h_t)`，在留出块上报告 attention KL、相对输出误差、R² 的 (τ=0..4) × (t=1..4) 矩阵。τ ≥ t 的格子按构造为精确，信息量在 τ < t。
 
-- **成立**：`τ = 2` 的 `c` 支持 `t = 6,7,8` 的 reader，KL 与 `τ = 8` 同列相差 ≤ 2×，且端到端 MATH500 保住 exact-KV 的 ≥ 95%。
-- **部分成立**：对角线与下三角（`τ ≥ t`）成立、右上角不成立。则 canonical memory 存在但不支持 adaptive depth；项目退化为"无重建的 LLA"，仍有吞吐意义，但 adaptive depth 一项撤回。
-- **不成立**：`r` 与 `T·d` 同量级才能达到上述 KL。则"loop-invariant canonical cache"假设本身错误，不再进入 §8。
+**Step 1，逐层蒸馏**（`ouro_depth/latent/train_stage1.py`，7 GPU，`register.py` 为 student）：body 冻结、teacher forcing；每层学写寄存器 `F_φ`、`P_R` 和每轮的 `A_t, Q_t^R, B_t`（r=512、RoPE 分支 64 维、K/V 共用一个 latent，与 vLLM MLA backend 对齐；24 层共 441M 参数，cache 27 KB/token 对比 exact T=4 的 768 KB）。损失 = attention KL + 相对输出 MSE；每个 token 每个 reader 轮随机指定 writer 深度（一半锁步、一半均匀），使整个 τ×t 矩阵都有梯度。评测输出 τ×t 的 KL 与输出误差矩阵。
 
-对照臂（形成 ablation）：A. prelude-only `c_j = E(h_{j,pre})`（对应 CART 的 frozen memory 思路，预期 variable-depth 泛化差）；B. final-hidden `c_j = E(h_{j,τ})`（预期重复 final-loop reuse 的失败）；C. 累积寄存器（主方案）。
+**判读（两条路线）**：
+
+- (2,4) 与 (4,4) 的 KL 在 2 倍以内 → 路线 A（模仿 teacher）足以支持 adaptive depth，蒸馏就够。
+- (2,4) 接近 (0,4) → 第 3、4 轮产生了前两轮无法预测的信息，路线 A 走不通；adaptive depth 只能靠路线 B（训练时把 early exit 真的放进循环，writer/reader 端到端共适应，无 teacher 目标），预算里要给路线 B 留位置。
+- 无论哪种，锁步对角线若做不到接近 LLA 的 reconstruct 水平（KL ≈ 0.06）或 `r` 需与 `T·d` 同量级，则"无重建的 loop-invariant cache"本身不成立。
+
+对照臂（`--writer first|final`）：A. prelude-only；B. final-hidden；C. 累积寄存器（主方案）。
 
 ## 7. 与本仓库现有结果的衔接
 
