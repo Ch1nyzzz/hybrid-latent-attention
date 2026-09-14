@@ -32,7 +32,8 @@ def main():
     Dk = cfg.num_key_value_heads * cfg.head_dim
     train = np.load(Path(args.data_dir) / "train.npy", mmap_mode="r"); dev = np.load(Path(args.data_dir) / "dev.npy")
     Xd, Yd = T * D + 1, T * 2 * Dk  # +1 bias column
-    xtx = torch.zeros(nL, Xd, Xd, device=device, dtype=torch.float64); xty = torch.zeros(nL, Xd, Yd, device=device, dtype=torch.float64)
+    xtx = [torch.zeros(Xd, Xd, device=device, dtype=torch.float64) for _ in range(nL)]
+    xty = [torch.zeros(Xd, Yd, device=device, dtype=torch.float64) for _ in range(nL)]
 
     def feats(l, n):
         x = torch.cat([teacher.h_in[l][t].reshape(n, D).float() for t in range(T)] + [torch.ones(n, 1, device=device)], 1)
@@ -46,13 +47,15 @@ def main():
                 x, y = feats(l, n); xtx[l] += (x.T @ x).double(); xty[l] += (x.T @ y).double()
             if i % 64 == 0: print("fit", i, flush=True)
         # ridge solutions per (layer, tau): use the first tau*D feature columns plus bias
-        W = {}
+        W = {}  # solutions kept on CPU (32 GB total on GPU otherwise); stats freed layer by layer
         for l in range(nL):
             for tau in range(T + 1):
                 cols = torch.cat([torch.arange(tau * D, device=device), torch.tensor([Xd - 1], device=device)])
                 A = xtx[l][cols][:, cols]; A = A + args.ridge * A.diagonal().mean() * torch.eye(len(cols), device=device, dtype=A.dtype)
-                W[(l, tau)] = torch.linalg.solve(A, xty[l][cols]).float()  # (tau*D+1, T*2*Dk)
-        del xtx, xty
+                W[(l, tau)] = torch.linalg.solve(A, xty[l][cols]).float().cpu()  # (tau*D+1, T*2*Dk)
+            xtx[l] = None; xty[l] = None
+            print("solved", l, flush=True)
+        del xtx, xty; torch.cuda.empty_cache()
         kl = torch.zeros(nL, T + 1, T); err = torch.zeros(nL, T + 1, T); r2 = torch.zeros(nL, T + 1, T); nb = 0
         for i in range(0, min(args.eval_blocks, len(dev)), args.micro_batch):
             ids = torch.from_numpy(dev[i:i + args.micro_batch].astype(np.int64)).to(device); teacher.run(ids); B, L = ids.shape; n = B * L
@@ -61,7 +64,7 @@ def main():
                 x, y = feats(l, n); attn = teacher.layers[l].self_attn
                 for tau in range(T + 1):
                     cols = torch.cat([torch.arange(tau * D, device=device), torch.tensor([Xd - 1], device=device)])
-                    yh = x[:, cols] @ W[(l, tau)]
+                    yh = x[:, cols] @ W[(l, tau)].to(device)
                     for t in range(T):
                         kh = yh[:, t * 2 * Dk: t * 2 * Dk + Dk].view(B, L, -1, cfg.head_dim).transpose(1, 2)
                         vh = yh[:, t * 2 * Dk + Dk: (t + 1) * 2 * Dk].view(B, L, -1, cfg.head_dim).transpose(1, 2)
