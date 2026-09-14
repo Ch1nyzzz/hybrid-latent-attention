@@ -14,13 +14,15 @@ from .register import LatentStudent, apply_rope
 
 
 class Swapped:
-    def __init__(self, model, student: LatentStudent, exit_loop: int | None = None):
+    def __init__(self, model, student: LatentStudent, exit_loop: int | None = None, layers: set[int] | None = None):
+        """layers: subset of layer indices to swap (None = all)."""
         self.model, self.student, self.exit_loop = model, student, exit_loop
         self.layers = model.model.layers[: model.config.num_hidden_layers]
         self.regs: list[Tensor | None] = [None] * len(self.layers)
         self.originals = [l.self_attn.forward for l in self.layers]
         for i, l in enumerate(self.layers):
-            l.self_attn.forward = self._make(i)
+            if layers is None or i in layers:
+                l.self_attn.forward = self._make(i)
 
     def restore(self):
         for l, f in zip(self.layers, self.originals):
@@ -62,7 +64,25 @@ class Swapped:
 
 
 @torch.no_grad()
-def logit_kl(model, student: LatentStudent, ids: Tensor, exit_loops: list[int | None]) -> dict:
+def trace_hidden(model, student: LatentStudent, ids: Tensor, layers: set[int] | None = None) -> list[float]:
+    """Relative error ||h_swap - h_teacher|| / ||h_teacher|| of every decoder-layer output, in execution order
+    (loop-major: index = loop * num_layers + layer)."""
+    outs: list[Tensor] = []
+    hooks = [l.register_forward_hook(lambda m, a, o: outs.append(o.float())) for l in model.model.layers[: model.config.num_hidden_layers]]
+    try:
+        model.model(input_ids=ids, use_cache=False); teacher = outs; outs = []
+        sw = Swapped(model, student, None, layers)
+        try:
+            model.model(input_ids=ids, use_cache=False)
+        finally:
+            sw.restore()
+        return [((a - b).norm() / b.norm()).item() for a, b in zip(outs, teacher)]
+    finally:
+        for h in hooks: h.remove()
+
+
+@torch.no_grad()
+def logit_kl(model, student: LatentStudent, ids: Tensor, exit_loops: list[int | None], layers: set[int] | None = None) -> dict:
     """Teacher vs swapped final-loop logits on one batch. Returns per exit_loop: mean KL(teacher||swapped),
     top-1 agreement, teacher NLL and swapped NLL of the next token."""
     tgt = ids[:, 1:]
@@ -74,7 +94,7 @@ def logit_kl(model, student: LatentStudent, ids: Tensor, exit_loops: list[int | 
     t_logp = F.log_softmax(final_logits(), -1)
     res = {}
     for ex in exit_loops:
-        sw = Swapped(model, student, ex)
+        sw = Swapped(model, student, ex, layers)
         try:
             s_logp = F.log_softmax(final_logits(), -1)
         finally:
