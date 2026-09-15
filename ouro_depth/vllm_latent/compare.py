@@ -17,15 +17,14 @@ def main():
     p.add_argument("--throughput", type=int, default=0, help="if > 0: run this many sampled generations of --tp-tokens tokens and report tok/s")
     p.add_argument("--tp-tokens", type=int, default=1024)
     args = p.parse_args()
-    if args.backend:
-        os.environ["VLLM_ATTENTION_BACKEND"] = args.backend
     from vllm import LLM, SamplingParams
     Path(args.out).mkdir(parents=True, exist_ok=True)
     llm = LLM(model=args.model, hf_overrides={"total_ut_steps": args.loops, "latent_student": args.student}, trust_remote_code=True, dtype="bfloat16",
               enforce_eager=True, enable_prefix_caching=False, enable_chunked_prefill=False, max_model_len=args.max_model_len,
-              max_num_batched_tokens=max(8192, args.max_model_len), gpu_memory_utilization=0.6, seed=0)
+              max_num_batched_tokens=max(8192, args.max_model_len), gpu_memory_utilization=0.6, seed=0,
+              **({"attention_backend": args.backend} if args.backend else {}))  # vLLM 0.26: env VLLM_ATTENTION_BACKEND is ignored
     tok = llm.get_tokenizer()
-    res = {"backend": os.environ.get("VLLM_ATTENTION_BACKEND", "auto")}
+    res = {"backend": args.backend or "auto"}
     ref = json.load(open(args.ref)) if args.ref and os.path.exists(args.ref) else None
     if ref:
         sp = SamplingParams(temperature=0.0, max_tokens=args.max_new, logprobs=5)
