@@ -278,6 +278,9 @@ class OuroForCausalLM(nn.Module, SupportsLoRA):
         self.logits_processor = LogitsProcessor(config.vocab_size)
         self.make_empty_intermediate_tensors = self.model.make_empty_intermediate_tensors
 
+    def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
+        return self.model.embed_input_ids(input_ids)
+
     def forward(self, input_ids, positions, intermediate_tensors=None, inputs_embeds=None):
         return self.model(input_ids, positions, intermediate_tensors, inputs_embeds)
 

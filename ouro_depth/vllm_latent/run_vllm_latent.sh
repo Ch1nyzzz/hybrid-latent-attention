@@ -2,7 +2,7 @@
 # vLLM latent-cache job (verl-coding image, vLLM 0.26; NO transformers downgrade). Env: MODE=compare|throughput|matheval.
 # Inputs: code bundle (BUNDLE), student checkpoint under /trisol/input/models (student-*.pt), model at /trisol/input/model.
 set -euo pipefail
-MODEL=/trisol/input/model; OUT=${TRISOL_OUTPUT_DIR:-/trisol/output}; WORK=/work/loop_scale
+MODEL=/trisol/input/model; export OUT=${TRISOL_OUTPUT_DIR:-/trisol/output}; WORK=/work/loop_scale
 mkdir -p "$WORK" "$OUT"; tar xzf "$BUNDLE" -C "$WORK"; cd "$WORK"; export PYTHONPATH="$WORK"
 STUDENT=${STUDENT:-$( (find /trisol/input/models -name 'student-*.pt' 2>/dev/null || true) | sort -V | tail -1)}
 echo "student: $STUDENT"
@@ -27,7 +27,7 @@ try:
     print("MISSING_ATTRS", [a for a in attrs if not hasattr(OuroForCausalLM, a)])
     print("IS_VLLM_MODEL", IB.is_vllm_model(OuroForCausalLM), "IS_TEXT_GEN", IB.is_text_generation_model(OuroForCausalLM))
     print("FWD_SIG", str(inspect.signature(OuroForCausalLM.forward)), "INIT_SIG", str(inspect.signature(OuroForCausalLM.__init__)), "LOGITS_SIG", str(inspect.signature(OuroForCausalLM.compute_logits)))
-    spec = importlib.util.spec_from_file_location("ouro_orig", "$OUT/ouro.py.orig"); m = importlib.util.module_from_spec(spec)
+    spec = importlib.util.spec_from_file_location("ouro_orig", __import__("os").environ["OUT"] + "/ouro.py.orig"); m = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(m); O = m.OuroForCausalLM
         print("ORIG_IS_TEXT_GEN", IB.is_text_generation_model(O), "ORIG_MISSING", [a for a in attrs if not hasattr(O, a)], "ORIG_FWD", str(inspect.signature(O.forward)))
