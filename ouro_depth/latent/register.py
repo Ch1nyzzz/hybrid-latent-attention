@@ -81,14 +81,14 @@ class LatentLayer(nn.Module):
         return torch.stack(regs)
 
     # ---- readers -------------------------------------------------------------------------------------------
-    def scores(self, t: int, q_rope: Tensor, h: Tensor, c_read: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
+    def scores(self, t: int, q: Tensor, h: Tensor, c_read: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
         """Attention logits (B, H, L, L) of reader loop t.
 
-        q_rope: teacher's RoPE'd query (B, H, L, head_dim) from the frozen q_proj; h: (B, L, hidden);
+        q: teacher's PRE-RoPE query (B, H, L, head_dim) from the frozen q_proj; h: (B, L, hidden);
         c_read: (B, L, rank+rank_v) register seen by this reader; cos/sin: teacher RoPE tables (B, L, head_dim).
         """
         ck = c_read[..., : self.rank]
-        qc = torch.einsum("bhid,hdr->bhir", q_rope, self.q_absorb[t])                    # absorbed query
+        qc = torch.einsum("bhid,hdr->bhir", q, self.q_absorb[t])                         # absorbed (NoPE) query
         if self.pos == "latent":
             cosL, sinL = rope_latent(cos, sin, self.rank)
             qc = apply_rope(qc, cosL, sinL)

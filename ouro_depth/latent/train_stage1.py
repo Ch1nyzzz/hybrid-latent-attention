@@ -53,8 +53,8 @@ def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer
     for t in range(T):
         h = h_loops[t]
         with torch.no_grad():
-            q, k, _ = teacher.qkv(l, h, cos, sin)
-            t_logits = torch.matmul(q, k.transpose(-1, -2)).float() * teacher.layers[l].self_attn.scaling + bias
+            q_rope, k, _, q = teacher.qkv(l, h, cos, sin)
+            t_logits = torch.matmul(q_rope, k.transpose(-1, -2)).float() * teacher.layers[l].self_attn.scaling + bias
             t_logp = F.log_softmax(t_logits, -1); del t_logits
             t_out = teacher.out[l][t].float()
         if writer_depth is None:

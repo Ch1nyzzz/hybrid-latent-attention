@@ -10,7 +10,7 @@ import torch
 from torch import Tensor
 from torch.nn import functional as F
 
-from .register import LatentStudent, apply_rope
+from .register import LatentStudent
 
 
 class Swapped:
@@ -53,8 +53,7 @@ class Swapped:
                 self.regs[i] = c
             c = self.regs[i]
             # ---- read
-            q = attn.q_proj(h).view(B, L, -1, attn.head_dim).transpose(1, 2)
-            q = apply_rope(q, cos, sin)
+            q = attn.q_proj(h).view(B, L, -1, attn.head_dim).transpose(1, 2)   # pre-RoPE query
             logits = sl.scores(current_ut, q, h, c, cos, sin).float()
             logits = logits + torch.full((L, L), -1e4, device=h.device).triu(1)
             probs = F.softmax(logits, -1).to(h.dtype)

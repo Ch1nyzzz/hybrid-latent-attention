@@ -43,15 +43,16 @@ class Teacher:
         self.model.model(input_ids=input_ids, use_cache=False)
         assert all(len(x) == self.loops for x in self.h_in)
 
-    def qkv(self, l: int, h: Tensor, cos: Tensor, sin: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        """Frozen projections of one loop's attention input: RoPE'd q, RoPE'd k, v, each (B, H, L, head_dim)."""
+    def qkv(self, l: int, h: Tensor, cos: Tensor, sin: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Frozen projections of one loop's attention input: RoPE'd q, RoPE'd k, v, and the pre-RoPE q (B, H, L, head_dim).
+        The student's absorbed content path must use the pre-RoPE q (positions are handled in latent space)."""
         attn = self.layers[l].self_attn
         B, L, _ = h.shape
         shp = (B, L, -1, attn.head_dim)
         q = attn.q_proj(h).view(shp).transpose(1, 2)
         k = attn.k_proj(h).view(shp).transpose(1, 2)
         v = attn.v_proj(h).view(shp).transpose(1, 2)
-        return apply_rope(q, cos, sin), apply_rope(k, cos, sin), v
+        return apply_rope(q, cos, sin), apply_rope(k, cos, sin), v, q
 
     def o_proj(self, l: int, x: Tensor) -> Tensor:
         return self.layers[l].self_attn.o_proj(x)
