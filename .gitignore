@@ -24,3 +24,6 @@ __pycache__/
 *.log
 *.jsonl
 .DS_Store
+
+# committed result summaries may be jsonl
+!/results/**/*.jsonl
