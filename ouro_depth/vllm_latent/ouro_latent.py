@@ -25,7 +25,7 @@ from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.attention import Attention
 from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm.model_executor.layers.linear import MergedColumnParallelLinear, QKVParallelLinear, RowParallelLinear
+from vllm.model_executor.layers.linear import ColumnParallelLinear, MergedColumnParallelLinear, RowParallelLinear
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead, VocabParallelEmbedding
@@ -52,12 +52,16 @@ class LatentRope(nn.Module):
         idx = torch.arange(d // 2) % n_freq
         self.register_buffer("inv_freq_lat", inv_freq[idx], persistent=False)                    # (d/2,)
 
-    def forward(self, positions: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-        """x: (T, ..., d) with positions (T,); tables computed on the fly (no max_position-sized buffers)."""
+    def tables(self, positions: torch.Tensor, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
+        """(cos, sin) of shape (T, 1, d) for positions (T,); computed once per step and shared by all layers/loops."""
         ang = positions.to(torch.float32)[:, None] * self.inv_freq_lat[None, :]                  # (T, d/2)
-        cos = torch.cat([ang.cos(), ang.cos()], -1).to(x.dtype); sin = torch.cat([ang.sin(), ang.sin()], -1).to(x.dtype)
-        while cos.dim() < x.dim():
-            cos = cos.unsqueeze(1); sin = sin.unsqueeze(1)
+        return torch.cat([ang.cos(), ang.cos()], -1).to(dtype)[:, None], torch.cat([ang.sin(), ang.sin()], -1).to(dtype)[:, None]
+
+    @staticmethod
+    def apply(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+        """x: (T, d) or (T, H, d)."""
+        if x.dim() == 2:
+            return x * cos[:, 0] + rotate_half(x) * sin[:, 0]
         return x * cos + rotate_half(x) * sin
 
 
@@ -93,7 +97,7 @@ class OuroLatentAttention(nn.Module):
         self.writer = lc.get("writer", "register")
         assert lc.get("pos", "latent") == "latent" and self.rank_v == self.rank, "vLLM path: latent RoPE with rank_v == rank"
         state = self.rank + self.rank_v
-        self.qkv_proj = QKVParallelLinear(hidden_size, self.head_dim, num_heads, num_kv_heads, bias=False, quant_config=quant_config, prefix=f"{prefix}.qkv_proj")
+        self.q_proj = ColumnParallelLinear(hidden_size, self.q_size, bias=False, quant_config=quant_config, prefix=f"{prefix}.q_proj")
         self.o_proj = RowParallelLinear(num_heads * self.head_dim, hidden_size, bias=False, quant_config=quant_config, prefix=f"{prefix}.o_proj")
         # ---- student (loaded separately, see OuroForCausalLM.load_latent_student)
         self.cand = nn.Linear(hidden_size, state, bias=False)
@@ -121,29 +125,15 @@ class OuroLatentAttention(nn.Module):
             self.attn_l1 = Attention(num_heads, self.rank1, self.scaling, num_kv_heads=1, cache_config=cache_config, quant_config=quant_config,
                                      attn_type=attn_type, prefix=f"{p1}.attn")
         self._reg: torch.Tensor | None = None
+        self.step: dict = {}   # per-step context set by OuroModel.forward: rope tables, decode mask (no per-call GPU syncs)
 
     def finalize(self, c: torch.Tensor) -> torch.Tensor:
         return c + self.finalize_mlp(c) if self.use_finalize else c
 
-    def _decode_mask(self, num_tokens: int, device) -> torch.Tensor | None:
-        """Per-token flag: True for decode tokens (query length 1), None if unknown."""
-        try:
-            md = get_forward_context().attn_metadata
-            if isinstance(md, dict):
-                md = md[self.attn_main.layer_name]
-            qsl = md.query_start_loc[: md.num_reqs + 1] if hasattr(md, "num_reqs") else md.query_start_loc
-            qlen = qsl[1:] - qsl[:-1]
-            mask = torch.repeat_interleave(qlen == 1, qlen)
-            if mask.numel() != num_tokens:
-                out = torch.zeros(num_tokens, dtype=torch.bool, device=device); out[: mask.numel()] = mask; return out
-            return mask
-        except Exception:
-            return None
 
     def forward(self, positions: torch.Tensor, hidden_states: torch.Tensor, current_ut: int) -> torch.Tensor:
-        T = hidden_states.shape[0]
-        qkv, _ = self.qkv_proj(hidden_states)
-        q = qkv[:, : self.q_size].view(T, self.num_heads, self.head_dim)          # pre-RoPE query
+        T = hidden_states.shape[0]; st = self.step
+        q, _ = self.q_proj(hidden_states); q = q.view(T, self.num_heads, self.head_dim)   # pre-RoPE query
         h = hidden_states
         # ---- write the register (lockstep recurrence over loops)
         u = self.cand(h)
@@ -156,9 +146,9 @@ class OuroLatentAttention(nn.Module):
         self._reg = c
         last = current_ut == self.loops - 1
         if current_ut == 0 and self.rank1:
-            c1 = self.cand1(h)
-            k1 = self.rope_l1(positions, c1[:, : self.rank1]); v1 = c1[:, self.rank1:]
-            q1 = self.rope_l1(positions, torch.einsum("thd,hdr->thr", q, self.q_absorb1))
+            c1 = self.cand1(h); cos1, sin1 = st["l1"]
+            k1 = LatentRope.apply(c1[:, : self.rank1], cos1, sin1); v1 = c1[:, self.rank1:]
+            q1 = LatentRope.apply(torch.einsum("thd,hdr->thr", q, self.q_absorb1), cos1, sin1)
             o = self.attn_l1(q1.reshape(T, -1), k1, v1).view(T, self.num_heads, self.rank1)
             o = torch.einsum("thr,hrd->thd", o, self.out_absorb1).reshape(T, -1)
             if last:  # single-loop models: still store the finalized register
@@ -167,28 +157,30 @@ class OuroLatentAttention(nn.Module):
             return out
         # keys/values from the current register; the last loop stores the finalized register instead (decode reads finals)
         c_store = self.finalize(c) if last else c
-        k = self.rope_lat(positions, c_store[:, : self.rank]); v = c_store[:, self.rank:]
-        # query side: decode tokens use the final-register reader set, prefill tokens the lockstep set
-        A, Bm = self.q_absorb[current_ut], self.out_absorb[current_ut]
-        if self.split:
-            dm = self._decode_mask(T, h.device)
-            if dm is None or bool(dm.all()):
-                A, Bm = self.q_absorb_d[current_ut], self.out_absorb_d[current_ut]; dm = None
+        cos, sin = st["main"]
+        k = LatentRope.apply(c_store[:, : self.rank], cos, sin); v = c_store[:, self.rank:]
+        # query side: decode tokens use the final-register reader set (A'/B'), prefill tokens the lockstep set (A/B);
+        # st["decode"] is True (all decode), False (all prefill) or a per-token bool mask (mixed batch) — decided once per step on the CPU
+        dm = st.get("decode", False) if self.split else False
+        if dm is True:
+            A, Bm = self.q_absorb_d[current_ut], self.out_absorb_d[current_ut]
+        else:
+            A, Bm = self.q_absorb[current_ut], self.out_absorb[current_ut]
         qc = torch.einsum("thd,hdr->thr", q, A)
-        if self.split and dm is not None and bool(dm.any()):
+        if isinstance(dm, torch.Tensor):
             qc = torch.where(dm[:, None, None], torch.einsum("thd,hdr->thr", q, self.q_absorb_d[current_ut]), qc)
-        qc = self.rope_lat(positions, qc)
+        qc = LatentRope.apply(qc, cos, sin)
         o = self.attn_main(qc.reshape(T, -1), k, v).view(T, self.num_heads, self.rank_v)
         o_out = torch.einsum("thr,hrd->thd", o, Bm)
-        if self.split and dm is not None and bool(dm.any()):
+        if isinstance(dm, torch.Tensor):
             o_out = torch.where(dm[:, None, None], torch.einsum("thr,hrd->thd", o, self.out_absorb_d[current_ut]), o_out)
         out, _ = self.o_proj(o_out.reshape(T, -1))
         return out
 
     def _store_final(self, c: torch.Tensor, positions: torch.Tensor) -> None:
         """Write the finalized register into the main cache without attending (loop-1-only path)."""
-        c_store = self.finalize(c)
-        k = self.rope_lat(positions, c_store[:, : self.rank]); v = c_store[:, self.rank:]
+        c_store = self.finalize(c); cos, sin = self.step["main"]
+        k = LatentRope.apply(c_store[:, : self.rank], cos, sin); v = c_store[:, self.rank:]
         self.attn_main(torch.zeros(c.shape[0], self.num_heads * self.rank, device=c.device, dtype=c.dtype), k, v)
 
 
@@ -247,7 +239,7 @@ class OuroModel(nn.Module):
             sd = {k[len(f"layers.{i}."):]: v for k, v in self._student_state.items() if k.startswith(f"layers.{i}.")}
             missing, unexpected = attn.load_state_dict(sd, strict=False)
             n += len(sd)
-            bad = [m for m in missing if not (m.startswith("qkv_proj") or m.startswith("o_proj") or m.startswith("attn") or m.startswith("rope"))]
+            bad = [m for m in missing if not (m.startswith("q_proj") or m.startswith("o_proj") or m.startswith("attn") or m.startswith("rope"))]
             assert not bad and not unexpected, (bad, unexpected)
         return n
 
@@ -255,11 +247,10 @@ class OuroModel(nn.Module):
         return self.embed_tokens(input_ids)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        stacked = [("qkv_proj", "q_proj", "q"), ("qkv_proj", "k_proj", "k"), ("qkv_proj", "v_proj", "v"),
-                   ("gate_up_proj", "gate_proj", 0), ("gate_up_proj", "up_proj", 1)]
+        stacked = [("gate_up_proj", "gate_proj", 0), ("gate_up_proj", "up_proj", 1)]
         params = dict(self.named_parameters()); loaded: set[str] = set()
         for name, w in weights:
-            if "rotary_emb.inv_freq" in name:
+            if "rotary_emb.inv_freq" in name or ".k_proj." in name or ".v_proj." in name:
                 continue
             for pname, wname, shard in stacked:
                 if wname in name:
@@ -272,8 +263,32 @@ class OuroModel(nn.Module):
                     getattr(params[name], "weight_loader", default_weight_loader)(params[name], w); loaded.add(name)
         return loaded
 
+    def _step_context(self, positions: torch.Tensor, T: int, dtype: torch.dtype) -> dict:
+        a0 = self.layers[0].self_attn
+        st = {"main": a0.rope_lat.tables(positions, dtype)}
+        if a0.rope_l1 is not None:
+            st["l1"] = a0.rope_l1.tables(positions, dtype)
+        md = get_forward_context().attn_metadata
+        if isinstance(md, dict):
+            md = md.get(a0.attn_main.layer_name) or next(iter(md.values()), None)
+        if md is None:                       # profiling / dummy run: lockstep readers
+            st["decode"] = False
+        elif int(md.max_query_len) == 1:     # pure decode step (the common case): final-register readers, no mask
+            st["decode"] = True
+        else:                                # prefill or mixed: per-token mask built without a host sync
+            qsl = md.query_start_loc[: md.num_reqs + 1] if hasattr(md, "num_reqs") else md.query_start_loc
+            qlen = qsl[1:] - qsl[:-1]
+            mask = torch.repeat_interleave(qlen == 1, qlen, output_size=int(md.num_actual_tokens))
+            if mask.numel() < T:
+                mask = torch.cat([mask, torch.zeros(T - mask.numel(), dtype=torch.bool, device=mask.device)])
+            st["decode"] = mask[:T]
+        return st
+
     def forward(self, input_ids, positions, intermediate_tensors=None, inputs_embeds=None):
         hidden_states = inputs_embeds if inputs_embeds is not None else self.embed_input_ids(input_ids)
+        st = self._step_context(positions, hidden_states.shape[0], hidden_states.dtype)
+        for layer in self.layers:
+            layer.self_attn.step = st
         for current_ut in range(self.total_ut_steps):
             residual = None
             for layer in self.layers[self.start_layer: self.end_layer]:
@@ -283,7 +298,7 @@ class OuroModel(nn.Module):
 
 
 class OuroForCausalLM(nn.Module, SupportsLoRA):
-    packed_modules_mapping = {"qkv_proj": ["q_proj", "k_proj", "v_proj"], "gate_up_proj": ["gate_proj", "up_proj"]}
+    packed_modules_mapping = {"gate_up_proj": ["gate_proj", "up_proj"]}
     hf_to_vllm_mapper = WeightsMapper(orig_to_new_prefix={"model.": "model."})
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
