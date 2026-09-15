@@ -14,7 +14,7 @@ def main():
     p.add_argument("--base", action="store_true", help="original Ouro model (exact per-loop KV) for a throughput baseline")
     p.add_argument("--ref", default="", help="hf_reference.json (auxiliary model input); optional")
     p.add_argument("--loops", type=int, default=4); p.add_argument("--max-new", type=int, default=64); p.add_argument("--max-model-len", type=int, default=4096)
-    p.add_argument("--backend", default="", help="VLLM_ATTENTION_BACKEND override, e.g. TRITON_ATTN or FLASH_ATTN")
+    p.add_argument("--attention-config", default="", help="JSON for vLLM attention_config (e.g. use_prefill_decode_attention)"); p.add_argument("--backend", default="", help="VLLM_ATTENTION_BACKEND override, e.g. TRITON_ATTN or FLASH_ATTN")
     p.add_argument("--throughput", type=int, default=0, help="if > 0: run this many sampled generations of --tp-tokens tokens and report tok/s")
     p.add_argument("--tp-tokens", type=int, default=1024); p.add_argument("--tp-prompt-tokens", type=int, default=0, help="pad the throughput prompt to this many tokens (long-context regime)")
     p.add_argument("--compile-config", default="", help="JSON for vLLM compilation_config; when given, enforce_eager is off (CUDA graphs / torch.compile)")
@@ -25,7 +25,7 @@ def main():
     cc = {"compilation_config": json.loads(args.compile_config)} if args.compile_config else {"enforce_eager": True}
     llm = LLM(model=args.model, hf_overrides=ovr, trust_remote_code=True, dtype="bfloat16", **cc, enable_prefix_caching=False, enable_chunked_prefill=False, max_model_len=args.max_model_len,
               max_num_batched_tokens=max(8192, args.max_model_len), gpu_memory_utilization=0.6, seed=0,
-              **({"attention_backend": args.backend} if args.backend else {}))  # vLLM 0.26: env VLLM_ATTENTION_BACKEND is ignored
+              **({"attention_backend": args.backend} if args.backend else {}), **({"attention_config": json.loads(args.attention_config)} if args.attention_config else {}))  # vLLM 0.26: env VLLM_ATTENTION_BACKEND is ignored
     tok = llm.get_tokenizer()
     res = {"backend": args.backend or "auto", "base": args.base, "compile_config": args.compile_config}
     ref = json.load(open(args.ref)) if args.ref and os.path.exists(args.ref) else None

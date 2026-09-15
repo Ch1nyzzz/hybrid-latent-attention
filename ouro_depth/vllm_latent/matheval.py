@@ -23,7 +23,7 @@ def grade(pred: str, gold: str, timeout: int = 5) -> bool:
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True); p.add_argument("--student", default=""); p.add_argument("--data", required=True); p.add_argument("--output", required=True)
-    p.add_argument("--base", action="store_true"); p.add_argument("--backend", default=""); p.add_argument("--loops", type=int, default=4)
+    p.add_argument("--base", action="store_true"); p.add_argument("--attention-config", default="", help="JSON for vLLM attention_config (e.g. use_prefill_decode_attention)"); p.add_argument("--backend", default=""); p.add_argument("--loops", type=int, default=4)
     p.add_argument("--n", type=int, default=4); p.add_argument("--temperature", type=float, default=1.0); p.add_argument("--top-p", type=float, default=0.7)
     p.add_argument("--max-new", type=int, default=8192); p.add_argument("--max-model-len", type=int, default=10240); p.add_argument("--gpu-mem", type=float, default=0.85)
     p.add_argument("--shard", type=int, default=0); p.add_argument("--nshards", type=int, default=1); p.add_argument("--limit", type=int, default=0); p.add_argument("--seed", type=int, default=0)
@@ -32,7 +32,7 @@ def main():
     ovr = {"total_ut_steps": args.loops} if args.base else {"total_ut_steps": args.loops, "latent_student": args.student}
     llm = LLM(model=args.model, hf_overrides=ovr, trust_remote_code=True, dtype="bfloat16", enforce_eager=True, enable_prefix_caching=False,
               max_model_len=args.max_model_len, max_num_batched_tokens=max(8192, args.max_model_len), gpu_memory_utilization=args.gpu_mem, seed=args.seed + args.shard,
-              **({"attention_backend": args.backend} if args.backend else {}))
+              **({"attention_backend": args.backend} if args.backend else {}), **({"attention_config": json.loads(args.attention_config)} if args.attention_config else {}))
     tok = llm.get_tokenizer()
     rows = [json.loads(l) for l in open(args.data)]
     if args.limit: rows = rows[: args.limit]
