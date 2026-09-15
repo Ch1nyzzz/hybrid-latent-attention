@@ -38,7 +38,9 @@ def main():
     if args.limit: rows = rows[: args.limit]
     rows = rows[args.shard::args.nshards]
     prompts = [tok.apply_chat_template([{"role": "user", "content": r["problem"] + INSTR}], tokenize=False, add_generation_prompt=True) for r in rows]
-    sp = SamplingParams(n=args.n, temperature=args.temperature, top_p=args.top_p, max_tokens=args.max_new, seed=args.seed + args.shard)
+    stop_ids = sorted({i for i in (tok.eos_token_id, tok.convert_tokens_to_ids("<|im_end|>")) if isinstance(i, int) and i >= 0})   # same stops as the HF eval
+    print(json.dumps({"STOP_IDS": stop_ids}), flush=True)
+    sp = SamplingParams(n=args.n, temperature=args.temperature, top_p=args.top_p, max_tokens=args.max_new, seed=args.seed + args.shard, stop_token_ids=stop_ids)
     t0 = time.time(); outs = llm.generate(prompts, sp); dt = time.time() - t0
     out_dir = Path(args.output); out_dir.mkdir(parents=True, exist_ok=True)
     n_ok = n_tok = n_trunc = 0; per_problem = {}
