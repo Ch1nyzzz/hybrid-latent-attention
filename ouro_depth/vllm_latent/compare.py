@@ -10,7 +10,8 @@ import torch
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--model", required=True); p.add_argument("--student", required=True); p.add_argument("--out", required=True)
+    p.add_argument("--model", required=True); p.add_argument("--student", default=""); p.add_argument("--out", required=True)
+    p.add_argument("--base", action="store_true", help="original Ouro model (exact per-loop KV) for a throughput baseline")
     p.add_argument("--ref", default="", help="hf_reference.json (auxiliary model input); optional")
     p.add_argument("--loops", type=int, default=4); p.add_argument("--max-new", type=int, default=64); p.add_argument("--max-model-len", type=int, default=4096)
     p.add_argument("--backend", default="", help="VLLM_ATTENTION_BACKEND override, e.g. TRITON_ATTN or FLASH_ATTN")
@@ -19,12 +20,13 @@ def main():
     args = p.parse_args()
     from vllm import LLM, SamplingParams
     Path(args.out).mkdir(parents=True, exist_ok=True)
-    llm = LLM(model=args.model, hf_overrides={"total_ut_steps": args.loops, "latent_student": args.student}, trust_remote_code=True, dtype="bfloat16",
+    ovr = {"total_ut_steps": args.loops} if args.base else {"total_ut_steps": args.loops, "latent_student": args.student}
+    llm = LLM(model=args.model, hf_overrides=ovr, trust_remote_code=True, dtype="bfloat16",
               enforce_eager=True, enable_prefix_caching=False, enable_chunked_prefill=False, max_model_len=args.max_model_len,
               max_num_batched_tokens=max(8192, args.max_model_len), gpu_memory_utilization=0.6, seed=0,
               **({"attention_backend": args.backend} if args.backend else {}))  # vLLM 0.26: env VLLM_ATTENTION_BACKEND is ignored
     tok = llm.get_tokenizer()
-    res = {"backend": args.backend or "auto"}
+    res = {"backend": args.backend or "auto", "base": args.base}
     ref = json.load(open(args.ref)) if args.ref and os.path.exists(args.ref) else None
     if ref:
         sp = SamplingParams(temperature=0.0, max_tokens=args.max_new, logprobs=5)
