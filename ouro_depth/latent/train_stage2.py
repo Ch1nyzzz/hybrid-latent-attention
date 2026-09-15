@@ -35,6 +35,8 @@ def parse():
     p.add_argument("--p-lockstep", type=float, default=0.25, help="decode-mode only: fraction of batches trained lockstep (prompt prefill regime)")
     p.add_argument("--eval-decode", action="store_true", help="also report the decode-structured logit KL at every eval (no decode-mode training)")
     p.add_argument("--exit-target", default="full", choices=["full", "reuse"], help="teacher for early-exit batches: full depth, or K/V reused from the exit loop")
+    p.add_argument("--train-only", default="all", choices=["all", "decode_readers"],
+                   help="decode_readers: freeze the writer and the lockstep readers, train only the final-register reader set (A'/B') — use with --decode-mode")
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--steps", type=int, default=600)
     p.add_argument("--lr", type=float, default=3e-4); p.add_argument("--warmup", type=int, default=50); p.add_argument("--weight-decay", type=float, default=0.01)
     p.add_argument("--lam-attn", type=float, default=0.5); p.add_argument("--p-exit", type=float, default=0.0)
@@ -102,7 +104,11 @@ def main():
     else:
         student = LatentStudent(cfgm.num_hidden_layers, cfgm.hidden_size, cfgm.num_attention_heads, cfgm.head_dim, args.loops, args.rank, args.d_rope,
                                 args.writer, args.rank_v, args.pos, args.finalize, args.rank1, args.split_readers).to(device); start_step = None
-    params = list(student.parameters())
+    if args.train_only == "decode_readers":
+        assert student.cfg.get("split_readers"), "--train-only decode_readers needs a split-reader student"
+        for n_, p_ in student.named_parameters():
+            p_.requires_grad_(n_.endswith("q_absorb_d") or n_.endswith("out_absorb_d"))
+    params = [p_ for p_ in student.parameters() if p_.requires_grad]
     if rank == 0:
         print(json.dumps({"STAGE2_CFG": vars(args) | {"student_cfg": student.cfg, "student_params": sum(p.numel() for p in params), "from_step": start_step, "world": world}}), flush=True)
     opt = torch.optim.AdamW(params, lr=args.lr, betas=(0.9, 0.95), weight_decay=args.weight_decay)
