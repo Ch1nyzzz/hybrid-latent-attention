@@ -10,7 +10,6 @@ the final-register reader set (A'); prefill tokens use the lockstep set (A). Loo
 Activate with hf_overrides={"latent_student": "/path/to/student.pt"}; the checkpoint's cfg fixes the geometry.
 Requires enforce_eager=True (the register state is threaded through Python) and tensor parallel size 1.
 """
-from __future__ import annotations
 
 import math
 from collections.abc import Iterable
