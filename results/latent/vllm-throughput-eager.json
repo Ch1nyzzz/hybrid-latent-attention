@@ -40,5 +40,40 @@
   "tok_per_s": 211.6,
   "tokens_per_seq": 512,
   "eager": true
+ },
+ {
+  "model": "latent 256 FA (S6 stage1, sync code)",
+  "seqs": 128,
+  "tok_per_s": 1070.7,
+  "tokens_per_seq": 512,
+  "eager": true
+ },
+ {
+  "model": "latent 256 Triton (S6 stage1, sync code)",
+  "seqs": 128,
+  "tok_per_s": 918.9,
+  "tokens_per_seq": 512,
+  "eager": true
+ },
+ {
+  "model": "latent 512 Flex (S5 stage3b, sync-free code)",
+  "seqs": 32,
+  "tok_per_s": 198.9,
+  "tokens_per_seq": 512,
+  "eager": true
+ },
+ {
+  "model": "latent 256 FA (S6 stage1, sync-free code)",
+  "seqs": 32,
+  "tok_per_s": 351.0,
+  "tokens_per_seq": 512,
+  "eager": true
+ },
+ {
+  "model": "latent 256 FA (S6 stage1, sync-free code)",
+  "seqs": 128,
+  "tok_per_s": 1465.4,
+  "tokens_per_seq": 512,
+  "eager": true
  }
 ]

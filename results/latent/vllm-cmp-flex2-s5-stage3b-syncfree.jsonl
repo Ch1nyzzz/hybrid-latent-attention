@@ -1,0 +1,10 @@
+{"CMP": {"id": "math500-000", "vllm_first": 2068, "hf_first": 2068, "first_match": true, "vllm_first_logprob": -0.24000948667526245, "hf_first_logprob_same_token": -0.35793614387512207, "matching_prefix": 64, "gen_len": 64}}
+{"CMP": {"id": "math500-001", "vllm_first": 3, "hf_first": 3, "first_match": true, "vllm_first_logprob": -0.749250054359436, "hf_first_logprob_same_token": -0.6987196803092957, "matching_prefix": 64, "gen_len": 64}}
+{"CMP": {"id": "math500-002", "vllm_first": 2068, "hf_first": 2068, "first_match": true, "vllm_first_logprob": -0.3758637011051178, "hf_first_logprob_same_token": -0.477029025554657, "matching_prefix": 64, "gen_len": 64}}
+{"CMP": {"id": "math500-003", "vllm_first": 2068, "hf_first": 2068, "first_match": true, "vllm_first_logprob": -0.1363937258720398, "hf_first_logprob_same_token": -0.1672656387090683, "matching_prefix": 64, "gen_len": 64}}
+{"CMP": {"id": "math500-004", "vllm_first": 2068, "hf_first": 2068, "first_match": true, "vllm_first_logprob": -0.6848914623260498, "hf_first_logprob_same_token": -0.8515521883964539, "matching_prefix": 64, "gen_len": 64}}
+{"CMP": {"id": "math500-005", "vllm_first": 2068, "hf_first": 2068, "first_match": true, "vllm_first_logprob": -0.10685965418815613, "hf_first_logprob_same_token": -0.13174879550933838, "matching_prefix": 18, "gen_len": 64}}
+{"CMP": {"id": "math500-006", "vllm_first": 2068, "hf_first": 2068, "first_match": true, "vllm_first_logprob": -0.42530006170272827, "hf_first_logprob_same_token": -0.5293528437614441, "matching_prefix": 64, "gen_len": 64}}
+{"CMP": {"id": "math500-007", "vllm_first": 2068, "hf_first": 2068, "first_match": true, "vllm_first_logprob": -0.5062754154205322, "hf_first_logprob_same_token": -0.5639976263046265, "matching_prefix": 64, "gen_len": 64}}
+{"CMP_SUMMARY": {"first_token_match": 1.0, "mean_matching_prefix": 58.25, "mean_abs_first_logprob_diff": 0.0817273911088705}}
+{"TP": {"seqs": 32, "tokens": 16384, "seconds": 81.8, "tok_per_s": 200.2}}
