@@ -8,7 +8,7 @@ STUDENT=${STUDENT:-$( (find /trisol/input/models -name 'student-*.pt' 2>/dev/nul
 echo "student: $STUDENT"
 V=/opt/conda/lib/python3.11/site-packages/vllm/model_executor/models
 cp "$V/ouro.py" "$OUT/ouro.py.orig" 2>/dev/null || true
-[ "${MODE:-}" = tp ] && case " ${TP_ARGS:-} " in *" --base "*) BASE=1;; esac
+case " ${TP_ARGS:-} ${MATHEVAL_ARGS:-} " in *" --base "*) BASE=1;; esac
 [ "${BASE:-0}" = 1 ] || cp ouro_depth/vllm_latent/ouro_latent.py "$V/ouro.py"
 export VLLM_USE_FLASHINFER_SAMPLER=0
 python -c "import vllm, transformers, torch; print('vllm', vllm.__version__, 'transformers', transformers.__version__, 'torch', torch.__version__)"
@@ -59,6 +59,23 @@ PY
     for n in ${TP_SEQS:-32 128}; do echo "=== tp seqs=$n"
       python ouro_depth/vllm_latent/compare.py --model "$MODEL" --student "$STUDENT" --out "$OUT/tp_$n" --throughput $n --tp-tokens ${TP_TOKENS:-512} ${TP_ARGS:-} 2>&1 | grep -E "^\{\"TP|COMPARE_DONE|Error|Traceback|KV cache size|Maximum concurrency|Using .* attention backend" | grep -vE "FutureWarning|LIBARCHIVE" | tail -8 || true
     done ;;
+  matheval)  # one vLLM engine per GPU, problems sharded; MATHEVAL_ARGS e.g. "--backend FLEX_ATTENTION" or "--base"
+    NGPU=$(nvidia-smi -L | wc -l); mkdir -p "$OUT/matheval"
+    for i in $(seq 0 $((NGPU-1))); do
+      CUDA_VISIBLE_DEVICES=$i python ouro_depth/vllm_latent/matheval.py --model "$MODEL" --student "$STUDENT" --data ouro_depth/matheval/data/math500.jsonl \
+        --output "$OUT/matheval" --shard $((i + ${SHARD_OFFSET:-0})) --nshards "${NSHARDS:-$NGPU}" ${MATHEVAL_ARGS:-} > "$OUT/matheval/shard$i.log" 2>&1 &
+    done; wait
+    for i in $(seq 0 $((NGPU-1))); do grep -q "^GEN_DONE" "$OUT/matheval/shard$i.log" || { echo "SHARD_FAILED $i"; grep -vE "LIBARCHIVE|FutureWarning" "$OUT/matheval/shard$i.log" | tail -25; }; done
+    grep -h "GEN_SUMMARY" "$OUT/matheval"/shard*.log || true
+    python - "$OUT/matheval" <<'PY'
+import json, glob, sys
+d = sys.argv[1]; rows = [json.loads(l) for f in sorted(glob.glob(f"{d}/shard*.jsonl")) for l in open(f)]
+n = len(rows); byp = {}
+for r in rows: byp.setdefault(r["id"], []).append(r["correct"])
+print(json.dumps({"MATHEVAL_MERGED": {"n_samples": n, "n_problems": len(byp), "avg_at_n": sum(r["correct"] for r in rows) / max(1, n), "pass_at_n": sum(any(v) for v in byp.values()) / max(1, len(byp)),
+      "mean_tokens": sum(r["tokens"] for r in rows) / max(1, n), "trunc_rate": sum(r["truncated"] for r in rows) / max(1, n)}}), flush=True)
+PY
+    ;;
   *) echo "unknown MODE $MODE"; exit 2 ;;
 esac
 echo "VLLM_LATENT_DONE mode=$MODE"
