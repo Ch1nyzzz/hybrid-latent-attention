@@ -88,6 +88,10 @@ print(json.dumps({"MATHEVAL_MERGED": {"n_samples": n, "n_problems": len(byp), "a
       "mean_tokens": sum(r["tokens"] for r in rows) / max(1, n), "trunc_rate": sum(r["truncated"] for r in rows) / max(1, n)}}), flush=True)
 PY
     ;;
+  dbg)  # synchronous CUDA launches so the failing kernel shows in the traceback; DBG_ARGS as for compare
+    REF=$(find /trisol/input/models -name 'hf_reference.json' 2>/dev/null | head -1); echo "ref: ${REF:-none}"
+    CUDA_LAUNCH_BLOCKING=1 python ouro_depth/vllm_latent/compare.py --model "$MODEL" --student "$STUDENT" --out "$OUT/dbg" ${REF:+--ref "$REF"} ${DBG_ARGS:-} > "$OUT/dbg.log" 2>&1 || true
+    grep -vE "LIBARCHIVE|FutureWarning" "$OUT/dbg.log" | grep -E 'File "|Error|error|illegal|CMP|COMPARE_DONE' | grep -v "ERROR 09" | sed 's/.*site-packages\///' | tail -60 ;;
   *) echo "unknown MODE $MODE"; exit 2 ;;
 esac
 echo "VLLM_LATENT_DONE mode=$MODE"
