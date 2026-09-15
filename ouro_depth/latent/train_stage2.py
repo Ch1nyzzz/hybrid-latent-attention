@@ -30,7 +30,7 @@ def parse():
     p.add_argument("--student", default="", help="stage-1 checkpoint to start from (empty = fresh student, needs --rank etc.)")
     p.add_argument("--rank", type=int, default=512); p.add_argument("--d-rope", type=int, default=64); p.add_argument("--rank-v", type=int, default=0)
     p.add_argument("--pos", default="decoupled"); p.add_argument("--writer", default="register"); p.add_argument("--loops", type=int, default=4)
-    p.add_argument("--finalize", action="store_true")
+    p.add_argument("--finalize", action="store_true"); p.add_argument("--rank1", type=int, default=0)
     p.add_argument("--decode-mode", action="store_true", help="train on the decode structure: pass 1 (no grad, lockstep, with early exit) gives the final history registers; pass 2 (with grad) reads them")
     p.add_argument("--p-lockstep", type=float, default=0.25, help="decode-mode only: fraction of batches trained lockstep (prompt prefill regime)")
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--steps", type=int, default=600)
@@ -61,6 +61,7 @@ def swapped_forward(model, sw: Swapped, ids, cap: Capture, lam_attn: float):
     pos = mm.rotary_emb(h, pos_ids)
     state = sw.student.cfg["rank"] + sw.student.cfg["rank_v"]
     regs = [torch.zeros(B, L, state, device=ids.device, dtype=h.dtype) for _ in layers]
+    sw.c1 = [None] * len(layers)
     aux = torch.zeros((), device=ids.device)
 
     def step(h, prev_reg, i, t):
@@ -98,7 +99,7 @@ def main():
         student = LatentStudent(**scfg).to(device); student.load_state_dict(ck["student"]); start_step = ck.get("step")
     else:
         student = LatentStudent(cfgm.num_hidden_layers, cfgm.hidden_size, cfgm.num_attention_heads, cfgm.head_dim, args.loops, args.rank, args.d_rope,
-                                args.writer, args.rank_v, args.pos, args.finalize).to(device); start_step = None
+                                args.writer, args.rank_v, args.pos, args.finalize, args.rank1).to(device); start_step = None
     params = list(student.parameters())
     if rank == 0:
         print(json.dumps({"STAGE2_CFG": vars(args) | {"student_cfg": student.cfg, "student_params": sum(p.numel() for p in params), "from_step": start_step, "world": world}}), flush=True)

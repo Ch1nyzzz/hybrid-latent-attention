@@ -19,6 +19,7 @@ class Swapped:
         self.model, self.student, self.exit_loop = model, student, exit_loop
         self.layers = model.model.layers[: model.config.num_hidden_layers]
         self.regs: list[Tensor | None] = [None] * len(self.layers)
+        self.c1: list[Tensor | None] = [None] * len(self.layers)   # dedicated loop-1 latents (rank1 > 0)
         self.last_attn: Tensor | None = None  # attention output of the most recent swapped call (stage-2 matching)
         self.originals = [l.self_attn.forward for l in self.layers]
         for i, l in enumerate(self.layers):
@@ -54,6 +55,8 @@ class Swapped:
                 c_now = c  # this loop's readers see the raw (lockstep) register
             else:
                 c_now = self.regs[i]  # frozen, finalised register of exited history tokens
+            if current_ut == 0 and sl.rank1:
+                self.c1[i] = sl.write1(h); c_now = self.c1[i]   # loop-1 readers use the dedicated loop-1 latent
             c = c_now
             # ---- read
             q = attn.q_proj(h).view(B, L, -1, attn.head_dim).transpose(1, 2)   # pre-RoPE query
@@ -93,8 +96,12 @@ class SwappedDecode(Swapped):
                 g = torch.sigmoid(sl.gate(torch.cat([prev, h], -1)))
                 c = (1 - g) * prev + g * u
             self.regs[i] = c
+            state = sl.rank + sl.rank_v
+            if current_ut == 0 and sl.rank1:
+                self.c1[i] = sl.write1(h); c = self.c1[i]; hist = self.hist[i][..., state:].to(c.dtype)   # loop-1 latents
+            else:
+                hist = self.hist[i][..., :state].to(c.dtype)
             q = attn.q_proj(h).view(B, L, -1, attn.head_dim).transpose(1, 2)
-            hist = self.hist[i].to(c.dtype)
             s_hist = sl.scores(current_ut, q, h, hist, cos, sin).float()          # (B, H, L, L) vs final history registers
             s_self = sl.scores(current_ut, q, h, c, cos, sin).float()             # only the diagonal is used
             eye = torch.eye(L, device=h.device, dtype=torch.bool)
@@ -118,9 +125,10 @@ def final_registers(model, student: LatentStudent, ids: Tensor, exit_loop: int |
         model.model(input_ids=ids, use_cache=False)
     finally:
         sw.restore()
-    if hist is None and exit_loop is not None:
-        return [r for r in sw.regs]            # Swapped already finalised at the exit loop
-    return [student.layers[i].finalize(sw.regs[i]) for i in range(len(sw.regs))]
+    regs = list(sw.regs) if (hist is None and exit_loop is not None) else [student.layers[i].finalize(sw.regs[i]) for i in range(len(sw.regs))]
+    if student.cfg["rank1"]:
+        regs = [torch.cat([r, c1.to(r.dtype)], -1) for r, c1 in zip(regs, sw.c1)]   # [register ; loop-1 latent]
+    return regs
 
 
 @torch.no_grad()

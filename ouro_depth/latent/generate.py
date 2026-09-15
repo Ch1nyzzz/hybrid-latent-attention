@@ -31,7 +31,8 @@ class LatentDecoder:
         self.model, self.student = model, student
         self.layers = model.model.layers[: model.config.num_hidden_layers]
         self.T = model.config.total_ut_steps
-        self.state = student.cfg["rank"] + student.cfg["rank_v"]
+        self.reg_dim = student.cfg["rank"] + student.cfg["rank_v"]
+        self.state = self.reg_dim + 2 * student.cfg["rank1"]      # cache row = [register ; loop-1 latent]
         dev = next(model.parameters()).device
         dummy = torch.zeros(1, max_len, model.config.hidden_size, device=dev, dtype=torch.bfloat16)
         self.cos_all, self.sin_all = model.model.rotary_emb(dummy, torch.arange(max_len, device=dev)[None])  # (1, max_len, D)
@@ -48,6 +49,8 @@ class LatentDecoder:
             sw.restore()
         with torch.autocast(ids.device.type, dtype=torch.bfloat16):
             regs = [sw.student.layers[i].finalize(sw.regs[i]) for i in range(len(self.layers))]
+            if self.student.cfg["rank1"]:
+                regs = [torch.cat([r, c1.to(r.dtype)], -1) for r, c1 in zip(regs, sw.c1)]
         return regs, self.model.lm_head(hs[-1][:, -1]).float()
 
     @torch.no_grad()
@@ -64,7 +67,8 @@ class LatentDecoder:
         out = [[int(next_tok[b])] for b in range(B)]
         done = torch.tensor([int(next_tok[b]) in stop_ids for b in range(B)], device=dev)
         cur: list[Tensor | None] = [None] * len(self.layers)
-        sl_all = self.student.layers
+        cur1: list[Tensor | None] = [None] * len(self.layers)
+        sl_all = self.student.layers; R = self.reg_dim
         originals = [l.self_attn.forward for l in self.layers]
 
         def make(i):
@@ -85,7 +89,11 @@ class LatentDecoder:
                     c = (1 - g) * prev + g * u
                 cur[i] = c
                 n = int(lens.max())
-                keys = torch.cat([hist[i][:, :n], c], 1)                 # (B, n+1, state): history + self
+                if current_ut == 0 and sl.rank1:
+                    cur1[i] = sl.write1(h)
+                    keys = torch.cat([hist[i][:, :n, R:], cur1[i]], 1)   # loop-1 latents of history + own
+                else:
+                    keys = torch.cat([hist[i][:, :n, :R], c], 1)         # (B, n+1, reg_dim): history registers + self
                 cos_k = torch.cat([self.cos_all[:, :n].expand(B, -1, -1), cos_q], 1)
                 sin_k = torch.cat([self.sin_all[:, :n].expand(B, -1, -1), sin_q], 1)
                 q = attn.q_proj(h).view(B, 1, -1, attn.head_dim).transpose(1, 2)
@@ -108,7 +116,9 @@ class LatentDecoder:
                     logits = self.model.lm_head(hs[-1][:, -1]).float()
                 with torch.autocast(dev.type, dtype=torch.bfloat16):
                     for i in range(len(self.layers)):
-                        hist[i][torch.arange(B, device=dev), lens] = sl_all[i].finalize(cur[i])[:, 0].to(hist[i].dtype)
+                        row = sl_all[i].finalize(cur[i])[:, 0]
+                        if sl_all[i].rank1: row = torch.cat([row, cur1[i][:, 0].to(row.dtype)], -1)
+                        hist[i][torch.arange(B, device=dev), lens] = row.to(hist[i].dtype)
                 lens = lens + 1
                 next_tok = logits.argmax(-1)
                 for b in range(B):

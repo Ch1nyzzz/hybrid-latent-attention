@@ -31,6 +31,7 @@ def parse():
     p.add_argument("--pos", default="decoupled", choices=["decoupled", "latent"], help="K positional scheme")
     p.add_argument("--init", default="random", choices=["random", "teacher"], help="teacher: SVD/selector init from the frozen weights (pos=latent, rank_v>0)")
     p.add_argument("--finalize", action="store_true", help="exit transform: readers at depth != writer depth read Phi(c), lockstep reads raw c")
+    p.add_argument("--rank1", type=int, default=0, help="dedicated loop-1 latent size (K and V each); loop-1 readers use it instead of the register")
     p.add_argument("--init-blocks", type=int, default=8)
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--accum", type=int, default=1)
     p.add_argument("--steps", type=int, default=0, help="0 = one pass over the training blocks")
@@ -51,6 +52,7 @@ def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer
     with torch.autocast(dev_type, dtype=torch.bfloat16):
         regs = student_layer.write(h_loops)                    # (T, B, L, rank+rank_v), raw (lockstep) registers
         fin = student_layer.finalize(regs)                     # registers as cached after exit
+        c1 = student_layer.write1(h_loops[0]) if student_layer.rank1 else None   # fixed loop-1 latent
     kls, outs = [], []
     for t in range(T):
         h = h_loops[t]
@@ -59,7 +61,9 @@ def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer
             t_logits = torch.matmul(q_rope, k.transpose(-1, -2)).float() * teacher.layers[l].self_attn.scaling + bias
             t_logp = F.log_softmax(t_logits, -1); del t_logits
             t_out = teacher.out[l][t].float()
-        if writer_depth is None:
+        if c1 is not None and t == 0:
+            c_read = c1                                                          # loop-1 reader: same for every writer depth
+        elif writer_depth is None:
             c_read = regs[t] if tau_fixed == t else fin[tau_fixed]
         else:
             idx = writer_depth[t]                                                # (B, L)
@@ -116,7 +120,7 @@ def main():
     teacher = Teacher(args.model_path, args.loops, device)
     cfg = teacher.cfg
     student = LatentStudent(cfg.num_hidden_layers, cfg.hidden_size, cfg.num_attention_heads, cfg.head_dim, args.loops, args.rank, args.d_rope,
-                            args.writer, args.rank_v, args.pos, args.finalize).to(device)
+                            args.writer, args.rank_v, args.pos, args.finalize, args.rank1).to(device)
     train = np.load(Path(args.data_dir) / "train.npy", mmap_mode="r"); dev = np.load(Path(args.data_dir) / "dev.npy")
     init_info = None
     if args.init == "teacher":

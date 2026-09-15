@@ -21,40 +21,52 @@ def teacher_init(student: LatentStudent, teacher: Teacher, blocks, device: torch
     cfg = student.cfg
     assert cfg["pos"] == "latent" and cfg["rank_v"] > 0, "teacher init is defined for --pos latent with a separate V latent"
     H, D, nL = cfg["heads"], cfg["head_dim"], cfg["num_layers"]
-    nf = D // 2; rK, rV = cfg["rank"], cfg["rank_v"]
+    nf = D // 2; rK, rV, r1 = cfg["rank"], cfg["rank_v"], cfg["rank1"]
     assert (rK // 2) % nf == 0 and rK // 2 // nf <= H, (rK, nf, H)
+    assert r1 == 0 or ((r1 // 2) % nf == 0 and r1 // 2 // nf <= H), (r1, nf, H)
     m = rK // 2 // nf
-    covk = torch.zeros(nL, nf, H, H, device=device, dtype=torch.float64)
-    covv = torch.zeros(nL, H * D, H * D, device=device, dtype=torch.float64)
+    zk = lambda: torch.zeros(nL, nf, H, H, device=device, dtype=torch.float64)
+    zv = lambda: torch.zeros(nL, H * D, H * D, device=device, dtype=torch.float64)
+    covk, covv, covk1, covv1 = zk(), zv(), zk(), zv()
     for i in range(0, len(blocks), micro_batch):
         ids = torch.from_numpy(np.asarray(blocks[i:i + micro_batch]).astype(np.int64)).to(device)
         teacher.run(ids)
         for l in range(nL):
             attn = teacher.layers[l].self_attn
-            for h in teacher.h_in[l]:
+            for t, h in enumerate(teacher.h_in[l]):
                 k = attn.k_proj(h).float().reshape(-1, H, D)          # (N, H, D)
                 comp = torch.cat([k[:, :, :nf], k[:, :, nf:]], 0)      # (2N, H, nf): real and imaginary parts as samples
-                covk[l] += torch.einsum("nhf,ngf->fhg", comp, comp).double()
-                v = attn.v_proj(h).float().reshape(-1, H * D)
-                covv[l] += (v.T @ v).double()
+                ck = torch.einsum("nhf,ngf->fhg", comp, comp).double()
+                v = attn.v_proj(h).float().reshape(-1, H * D); cv = (v.T @ v).double()
+                covk[l] += ck; covv[l] += cv
+                if t == 0: covk1[l] += ck; covv1[l] += cv
+
+    def fill(covk_l, covv_l, Wk, Wv, rk, rv):
+        """Per-frequency PCA across heads for K (latent pair p = s*nf + f), PCA for V. Returns cand rows, A, B."""
+        mm = rk // 2 // nf
+        cand = torch.zeros(rk + rv, Wk.shape[1], device=device); A = torch.zeros(H, D, rk, device=device)
+        for f in range(nf):
+            evals, evecs = torch.linalg.eigh(covk_l[f])                     # ascending
+            M = evecs[:, -mm:].flip(-1).T.float()                           # (mm, H) top components
+            for s_ in range(mm):
+                p_ = s_ * nf + f
+                cand[p_] = torch.einsum("h,hd->d", M[s_], Wk.view(H, D, -1)[:, f])
+                cand[rk // 2 + p_] = torch.einsum("h,hd->d", M[s_], Wk.view(H, D, -1)[:, nf + f])
+                A[:, f, p_] = M[s_]; A[:, nf + f, rk // 2 + p_] = M[s_]
+        evals, evecs = torch.linalg.eigh(covv_l)
+        Pv = evecs[:, -rv:].flip(-1).T.float()                              # (rv, H*D)
+        cand[rk:] = Pv @ Wv
+        return cand, A, Pv.view(rv, H, D).permute(1, 0, 2)
+
     for l in range(nL):
         sl = student.layers[l]; attn = teacher.layers[l].self_attn
         Wk = attn.k_proj.weight.float(); Wv = attn.v_proj.weight.float()        # (H*D, hidden)
-        cand = torch.zeros_like(sl.cand.weight, dtype=torch.float32)
-        A = torch.zeros(H, D, rK, device=device)
-        for f in range(nf):
-            evals, evecs = torch.linalg.eigh(covk[l, f])                    # ascending
-            M = evecs[:, -m:].flip(-1).T.float()                            # (m, H) top components
-            for s in range(m):
-                p = s * nf + f
-                cand[p] = torch.einsum("h,hd->d", M[s], Wk.view(H, D, -1)[:, f])
-                cand[rK // 2 + p] = torch.einsum("h,hd->d", M[s], Wk.view(H, D, -1)[:, nf + f])
-                A[:, f, p] = M[s]; A[:, nf + f, rK // 2 + p] = M[s]
-        evals, evecs = torch.linalg.eigh(covv[l])
-        Pv = evecs[:, -rV:].flip(-1).T.float()                              # (rV, H*D)
-        cand[rK:] = Pv @ Wv
+        cand, A, Bm = fill(covk[l], covv[l], Wk, Wv, rK, rV)
         sl.cand.weight.copy_(cand.to(sl.cand.weight.dtype))
         sl.q_absorb.copy_(A[None].expand(cfg["loops"], -1, -1, -1))
-        sl.out_absorb.copy_(Pv.view(rV, H, D).permute(1, 0, 2)[None].expand(cfg["loops"], -1, -1, -1))
+        sl.out_absorb.copy_(Bm[None].expand(cfg["loops"], -1, -1, -1))
         sl.gate.weight.zero_(); sl.gate.bias.fill_(8.0)
-    return {"slots_per_freq": m, "rank_k": rK, "rank_v": rV, "exact": m == H and rV == H * D}
+        if r1:
+            cand1, A1, B1 = fill(covk1[l], covv1[l], Wk, Wv, r1, r1)
+            sl.cand1.weight.copy_(cand1.to(sl.cand1.weight.dtype)); sl.q_absorb1.copy_(A1); sl.out_absorb1.copy_(B1)
+    return {"slots_per_freq": m, "rank_k": rK, "rank_v": rV, "rank1": r1, "exact": m == H and rV == H * D}
