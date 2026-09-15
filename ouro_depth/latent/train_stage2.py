@@ -33,6 +33,7 @@ def parse():
     p.add_argument("--finalize", action="store_true"); p.add_argument("--rank1", type=int, default=0)
     p.add_argument("--decode-mode", action="store_true", help="train on the decode structure: pass 1 (no grad, lockstep, with early exit) gives the final history registers; pass 2 (with grad) reads them")
     p.add_argument("--p-lockstep", type=float, default=0.25, help="decode-mode only: fraction of batches trained lockstep (prompt prefill regime)")
+    p.add_argument("--eval-decode", action="store_true", help="also report the decode-structured logit KL at every eval (no decode-mode training)")
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--steps", type=int, default=600)
     p.add_argument("--lr", type=float, default=3e-4); p.add_argument("--warmup", type=int, default=50); p.add_argument("--weight-decay", type=float, default=0.01)
     p.add_argument("--lam-attn", type=float, default=0.5); p.add_argument("--p-exit", type=float, default=0.0)
@@ -120,7 +121,7 @@ def main():
 
     def run_eval(step):
         student.eval(); exits = list(range(1, T)) + [None]
-        modes = [("lockstep", False), ("decode", True)] if args.decode_mode else [("lockstep", False)]
+        modes = [("lockstep", False), ("decode", True)] if (args.decode_mode or args.eval_decode) else [("lockstep", False)]
         allres = {}
         for name, dec in modes:
             acc = {str(e): torch.zeros(4, device=device) for e in exits}; n = 0
