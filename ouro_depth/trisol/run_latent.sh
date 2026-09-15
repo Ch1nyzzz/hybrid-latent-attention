@@ -48,6 +48,9 @@ print(json.dumps({"MATHEVAL_MERGED": {"n_samples": n, "n_problems": len(byp), "a
       "mean_tokens": sum(r["tokens"] for r in rows) / max(1, n), "trunc_rate": sum(r["truncated"] for r in rows) / max(1, n)}}), flush=True)
 PY
     ;;
+  hfref)  # HF-side reference streams for the vLLM comparison (student from the auxiliary model input)
+    STUDENT=${STUDENT:-$(find /trisol/input/models -name 'student-*.pt' 2>/dev/null | sort -V | tail -1)}
+    python -m ouro_depth.latent.hf_reference --model-path "$MODEL" --student "$STUDENT" --data ouro_depth/matheval/data/math500.jsonl --output "$OUT/hfref" ${HFREF_ARGS:-} ;;
   vllmprobe)
     python ouro_depth/trisol/vllm_probe.py ;;
   logit)  # student checkpoint from an auxiliary model input (--model NAME:CODE -> /trisol/input/models/model-0)
