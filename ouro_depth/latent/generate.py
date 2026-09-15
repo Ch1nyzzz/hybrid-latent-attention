@@ -162,14 +162,15 @@ def main():
         enc = [tok(t, return_tensors="pt", add_special_tokens=False).input_ids.to(device) for t in texts]
         if dec is not None:
             gens = dec.generate(enc, args.max_new, stop_ids)
-        else:
-            tok.padding_side = "left"
-            if tok.pad_token_id is None: tok.pad_token = tok.eos_token
-            pad = tok(texts, return_tensors="pt", padding=True, add_special_tokens=False).to(device)
-            with torch.no_grad():
-                g = model.generate(**pad, do_sample=False, max_new_tokens=args.max_new, pad_token_id=tok.pad_token_id, eos_token_id=list(stop_ids))
-            gens = [g[b, pad.input_ids.shape[1]:].tolist() for b in range(len(batch))]
-            gens = [[x for x in gg if x != tok.pad_token_id] for gg in gens]
+        else:  # base model: one prompt at a time with the model's own per-loop cache (known-good HF generate path)
+            from ..vendor.modeling_ouro import UniversalTransformerCache
+            gens = []
+            for ids in enc:
+                cache = UniversalTransformerCache(model.config.num_hidden_layers * model.config.total_ut_steps)
+                with torch.no_grad():
+                    g = model.generate(input_ids=ids, do_sample=False, max_new_tokens=args.max_new, past_key_values=cache, use_cache=True,
+                                       pad_token_id=tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id, eos_token_id=list(stop_ids))
+                gens.append(g[0, ids.shape[1]:].tolist())
         for r, gg in zip(batch, gens):
             text = tok.decode(gg, skip_special_tokens=True)
             ok = grade(text, r["answer"]); trunc = not any(x in stop_ids for x in gg[-2:]) and len(gg) >= args.max_new - 1
