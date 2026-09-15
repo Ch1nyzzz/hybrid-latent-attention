@@ -11,6 +11,15 @@ cp "$V/ouro.py" "$OUT/ouro.py.orig" 2>/dev/null || true
 cp ouro_depth/vllm_latent/ouro_latent.py "$V/ouro.py"
 export VLLM_USE_FLASHINFER_SAMPLER=0
 python -c "import vllm, transformers, torch; print('vllm', vllm.__version__, 'transformers', transformers.__version__, 'torch', torch.__version__)"
+python - <<'PY'
+import traceback
+try:
+    from vllm.model_executor.models.ouro import OuroForCausalLM
+    from vllm.model_executor.models.registry import ModelRegistry
+    print("IMPORT_OK", OuroForCausalLM, "text_gen:", ModelRegistry.is_text_generation_model(["OuroForCausalLM"]))
+except Exception:
+    traceback.print_exc(); print("IMPORT_FAILED")
+PY
 case "${MODE:?}" in
   compare)
     REF=$(find /trisol/input/models -name 'hf_reference.json' 2>/dev/null | head -1); echo "ref: ${REF:-none}"
