@@ -75,5 +75,44 @@
   "tok_per_s": 1465.4,
   "tokens_per_seq": 512,
   "eager": true
+ },
+ {
+  "model": "latent 512 Flex (S5 stage3b, sync-free code)",
+  "seqs": 128,
+  "tok_per_s": 674.6,
+  "tokens_per_seq": 512,
+  "eager": true
+ },
+ {
+  "model": "base exact KV",
+  "seqs": 32,
+  "tok_per_s": 1406.7,
+  "tokens_per_seq": 512,
+  "eager": false,
+  "cudagraph": "FULL_DECODE_ONLY"
+ },
+ {
+  "model": "base exact KV",
+  "seqs": 128,
+  "tok_per_s": 4097.9,
+  "tokens_per_seq": 512,
+  "eager": false,
+  "cudagraph": "FULL_DECODE_ONLY"
+ },
+ {
+  "model": "latent 256 FA (S6 stage1, sync-free code)",
+  "seqs": 32,
+  "tok_per_s": 884.4,
+  "tokens_per_seq": 512,
+  "eager": false,
+  "cudagraph": "FULL_DECODE_ONLY"
+ },
+ {
+  "model": "latent 256 FA (S6 stage1, sync-free code)",
+  "seqs": 128,
+  "tok_per_s": 2991.2,
+  "tokens_per_seq": 512,
+  "eager": false,
+  "cudagraph": "FULL_DECODE_ONLY"
  }
 ]
