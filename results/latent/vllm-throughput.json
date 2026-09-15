@@ -144,5 +144,21 @@
   "tok_per_s": 1242.7,
   "tokens_per_seq": 512,
   "eager": true
+ },
+ {
+  "model": "base exact KV, FlexAttention",
+  "seqs": 32,
+  "tok_per_s": 536.4,
+  "tokens_per_seq": 512,
+  "eager": false,
+  "cudagraph": "FULL_DECODE_ONLY"
+ },
+ {
+  "model": "base exact KV, FlexAttention",
+  "seqs": 128,
+  "tok_per_s": 1838.4,
+  "tokens_per_seq": 512,
+  "eager": false,
+  "cudagraph": "FULL_DECODE_ONLY"
  }
 ]
