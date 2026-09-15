@@ -55,15 +55,16 @@ class Swapped:
                 c_now = c  # this loop's readers see the raw (lockstep) register
             else:
                 c_now = self.regs[i]  # frozen, finalised register of exited history tokens
+            frozen = not (self.exit_loop is None or current_ut < self.exit_loop)   # history exited: cached final registers
             if current_ut == 0 and sl.rank1:
                 self.c1[i] = sl.write1(h); c_now = self.c1[i]   # loop-1 readers use the dedicated loop-1 latent
             c = c_now
             # ---- read
             q = attn.q_proj(h).view(B, L, -1, attn.head_dim).transpose(1, 2)   # pre-RoPE query
-            logits = sl.scores(current_ut, q, h, c, cos, sin).float()
+            logits = sl.scores(current_ut, q, h, c, cos, sin, final=frozen).float()
             logits = logits + torch.full((L, L), -1e4, device=h.device).triu(1)
             probs = F.softmax(logits, -1).to(h.dtype)
-            out = attn.o_proj(sl.read_out(current_ut, probs, c))
+            out = attn.o_proj(sl.read_out(current_ut, probs, c, final=frozen))
             self.last_attn = out
             return out, None
 
@@ -102,13 +103,13 @@ class SwappedDecode(Swapped):
             else:
                 hist = self.hist[i][..., :state].to(c.dtype)
             q = attn.q_proj(h).view(B, L, -1, attn.head_dim).transpose(1, 2)
-            s_hist = sl.scores(current_ut, q, h, hist, cos, sin).float()          # (B, H, L, L) vs final history registers
-            s_self = sl.scores(current_ut, q, h, c, cos, sin).float()             # only the diagonal is used
+            s_hist = sl.scores(current_ut, q, h, hist, cos, sin, final=True).float()   # (B, H, L, L) vs cached final registers
+            s_self = sl.scores(current_ut, q, h, c, cos, sin, final=False).float()     # own in-progress register (diagonal only)
             eye = torch.eye(L, device=h.device, dtype=torch.bool)
             strict = torch.tril(torch.ones(L, L, device=h.device, dtype=torch.bool), -1)
             logits = torch.where(strict, s_hist, torch.where(eye, s_self, torch.full_like(s_hist, -1e4)))
             probs = F.softmax(logits, -1).to(h.dtype)
-            out = sl.read_out(current_ut, probs * strict, hist) + sl.read_out(current_ut, probs * eye, c)
+            out = sl.read_out(current_ut, probs * strict, hist, final=True) + sl.read_out(current_ut, probs * eye, c, final=False)
             out = attn.o_proj(out)
             self.last_attn = out
             return out, None

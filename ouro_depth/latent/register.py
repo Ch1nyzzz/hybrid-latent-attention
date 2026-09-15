@@ -46,12 +46,16 @@ class LatentLayer(nn.Module):
     """Writer (shared over loops) + per-loop readers for one decoder layer."""
 
     def __init__(self, hidden: int, heads: int, head_dim: int, loops: int, rank: int, d_rope: int, writer: str = "register",
-                 rank_v: int = 0, pos: str = "decoupled", finalize: bool = False, rank1: int = 0):
+                 rank_v: int = 0, pos: str = "decoupled", finalize: bool = False, rank1: int = 0, split_readers: bool = False):
         super().__init__()
         assert pos in ("decoupled", "latent") and (pos == "decoupled" or rank % 2 == 0)
         self.hidden, self.heads, self.head_dim, self.loops, self.rank, self.d_rope, self.writer = hidden, heads, head_dim, loops, rank, d_rope, writer
-        self.rank_v, self.pos, self.use_finalize, self.rank1 = rank_v, pos, finalize, rank1
+        self.rank_v, self.pos, self.use_finalize, self.rank1, self.split_readers = rank_v, pos, finalize, rank1, split_readers
         state = rank + rank_v
+        if split_readers:  # second reader set for FINAL (cached) registers; the first set reads in-progress (lockstep / self) registers
+            assert pos == "latent"
+            self.q_absorb_d = nn.Parameter(torch.empty(loops, heads, head_dim, rank)); nn.init.normal_(self.q_absorb_d, std=1.0 / math.sqrt(head_dim))
+            self.out_absorb_d = nn.Parameter(torch.zeros(loops, heads, rank_v or rank, head_dim))
         if rank1:  # dedicated loop-1 latent [c1^K ; c1^V] (2*rank1), a fixed linear function of the loop-1 input; loop-1 readers use it
             assert pos == "latent" and rank1 % 2 == 0
             self.cand1 = nn.Linear(hidden, 2 * rank1, bias=False)
@@ -98,15 +102,17 @@ class LatentLayer(nn.Module):
 
     # ---- readers -------------------------------------------------------------------------------------------
     def scores(self, t: int, q: Tensor, h: Tensor, c_read: Tensor, cos: Tensor, sin: Tensor,
-               cos_q: Tensor | None = None, sin_q: Tensor | None = None) -> Tensor:
+               cos_q: Tensor | None = None, sin_q: Tensor | None = None, final: bool = False) -> Tensor:
         """Attention logits (B, H, Lq, Lk) of reader loop t.
 
         q: teacher's PRE-RoPE query (B, H, Lq, head_dim) from the frozen q_proj; h: (B, Lq, hidden);
         c_read: (B, Lk, rank+rank_v) registers seen by this reader; cos/sin: RoPE tables of the KEY positions (B, Lk, head_dim);
-        cos_q/sin_q: RoPE tables of the query positions (default: same as the keys, i.e. Lq == Lk aligned).
+        cos_q/sin_q: RoPE tables of the query positions (default: same as the keys, i.e. Lq == Lk aligned);
+        final: the keys are cached final registers (decode reader set) rather than in-progress ones.
         """
         if cos_q is None:
             cos_q, sin_q = cos, sin
+        A = self.q_absorb_d if (final and self.split_readers) else self.q_absorb
         if t == 0 and self.rank1:  # loop-1 reader on the dedicated loop-1 latent
             ck = c_read[..., : self.rank1]
             qc = torch.einsum("bhid,hdr->bhir", q, self.q_absorb1)
@@ -114,7 +120,7 @@ class LatentLayer(nn.Module):
             qc = apply_rope(qc, cosQ, sinQ); ck = ck * cosL + rotate_half(ck) * sinL
             return torch.einsum("bhir,bjr->bhij", qc, ck) / math.sqrt(self.head_dim)
         ck = c_read[..., : self.rank]
-        qc = torch.einsum("bhid,hdr->bhir", q, self.q_absorb[t])                         # absorbed (NoPE) query
+        qc = torch.einsum("bhid,hdr->bhir", q, A[t])                                     # absorbed (NoPE) query
         if self.pos == "latent":
             cosL, sinL = rope_latent(cos, sin, self.rank)
             cosQ, sinQ = rope_latent(cos_q, sin_q, self.rank)
@@ -130,25 +136,26 @@ class LatentLayer(nn.Module):
         return (torch.einsum("bhir,bjr->bhij", qc, ck) / math.sqrt(self.head_dim)
                 + torch.einsum("bhid,bjd->bhij", qr, kr) / math.sqrt(self.d_rope))
 
-    def read_out(self, t: int, probs: Tensor, c_read: Tensor) -> Tensor:
+    def read_out(self, t: int, probs: Tensor, c_read: Tensor, final: bool = False) -> Tensor:
         """probs (B, H, L, L), c_read (B, L, rank+rank_v) -> per-head outputs (B, L, H*head_dim) before the frozen o_proj."""
         if t == 0 and self.rank1:
             z = torch.einsum("bhij,bjr->bhir", probs, c_read[..., self.rank1: 2 * self.rank1])
             o = torch.einsum("bhir,hrd->bhid", z, self.out_absorb1)
             return o.transpose(1, 2).reshape(probs.shape[0], probs.shape[2], -1)
+        Bm = self.out_absorb_d if (final and self.split_readers) else self.out_absorb
         cv = c_read[..., self.rank:] if self.rank_v else c_read[..., : self.rank]
         z = torch.einsum("bhij,bjr->bhir", probs, cv)
-        o = torch.einsum("bhir,hrd->bhid", z, self.out_absorb[t])
+        o = torch.einsum("bhir,hrd->bhid", z, Bm[t])
         return o.transpose(1, 2).reshape(probs.shape[0], probs.shape[2], -1)
 
 
 class LatentStudent(nn.Module):
     def __init__(self, num_layers: int, hidden: int, heads: int, head_dim: int, loops: int, rank: int, d_rope: int,
-                 writer: str = "register", rank_v: int = 0, pos: str = "decoupled", finalize: bool = False, rank1: int = 0):
+                 writer: str = "register", rank_v: int = 0, pos: str = "decoupled", finalize: bool = False, rank1: int = 0, split_readers: bool = False):
         super().__init__()
-        self.layers = nn.ModuleList(LatentLayer(hidden, heads, head_dim, loops, rank, d_rope, writer, rank_v, pos, finalize, rank1) for _ in range(num_layers))
+        self.layers = nn.ModuleList(LatentLayer(hidden, heads, head_dim, loops, rank, d_rope, writer, rank_v, pos, finalize, rank1, split_readers) for _ in range(num_layers))
         self.cfg = dict(num_layers=num_layers, hidden=hidden, heads=heads, head_dim=head_dim, loops=loops, rank=rank, d_rope=d_rope,
-                        writer=writer, rank_v=rank_v, pos=pos, finalize=finalize, rank1=rank1)
+                        writer=writer, rank_v=rank_v, pos=pos, finalize=finalize, rank1=rank1, split_readers=split_readers)
 
     def cache_bytes_per_token(self, dtype_bytes: int = 2) -> int:
         c = self.cfg

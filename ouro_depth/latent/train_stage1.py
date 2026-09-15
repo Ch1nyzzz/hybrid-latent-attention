@@ -32,6 +32,7 @@ def parse():
     p.add_argument("--init", default="random", choices=["random", "teacher"], help="teacher: SVD/selector init from the frozen weights (pos=latent, rank_v>0)")
     p.add_argument("--finalize", action="store_true", help="exit transform: readers at depth != writer depth read Phi(c), lockstep reads raw c")
     p.add_argument("--rank1", type=int, default=0, help="dedicated loop-1 latent size (K and V each); loop-1 readers use it instead of the register")
+    p.add_argument("--split-readers", action="store_true", help="separate reader maps for in-progress (lockstep/self) vs final (cached) registers")
     p.add_argument("--init-blocks", type=int, default=8)
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--accum", type=int, default=1)
     p.add_argument("--steps", type=int, default=0, help="0 = one pass over the training blocks")
@@ -61,20 +62,32 @@ def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer
             t_logits = torch.matmul(q_rope, k.transpose(-1, -2)).float() * teacher.layers[l].self_attn.scaling + bias
             t_logp = F.log_softmax(t_logits, -1); del t_logits
             t_out = teacher.out[l][t].float()
+        raw_mask = None                                                          # (B, L) keys read as in-progress registers
         if c1 is not None and t == 0:
-            c_read = c1                                                          # loop-1 reader: same for every writer depth
+            c_read = c1; is_final = False                                        # loop-1 reader: same for every writer depth
         elif writer_depth is None:
-            c_read = regs[t] if tau_fixed == t else fin[tau_fixed]
+            c_read = regs[t] if tau_fixed == t else fin[tau_fixed]; is_final = tau_fixed != t
         else:
             idx = writer_depth[t]                                                # (B, L)
             c_fin = torch.gather(fin, 0, idx[None, :, :, None].expand(1, *idx.shape, fin.shape[-1]))[0]
-            c_read = torch.where((idx == t)[..., None], regs[t], c_fin)
+            raw_mask = idx == t
+            c_read = torch.where(raw_mask[..., None], regs[t], c_fin); is_final = True
         with torch.autocast(dev_type, dtype=torch.bfloat16):
-            s_logits = student_layer.scores(t, q, h, c_read, cos, sin)
+            if raw_mask is not None and student_layer.split_readers:             # per-key reader set: raw keys -> A, final keys -> A'
+                s_logits = torch.where(raw_mask[:, None, None, :], student_layer.scores(t, q, h, c_read, cos, sin, final=False),
+                                       student_layer.scores(t, q, h, c_read, cos, sin, final=True))
+            else:
+                s_logits = student_layer.scores(t, q, h, c_read, cos, sin, final=is_final)
         s_logp = F.log_softmax(s_logits.float() + bias, -1); del s_logits
         kl = (t_logp.exp() * (t_logp - s_logp)).sum(-1).mean()
         with torch.autocast(dev_type, dtype=torch.bfloat16):
-            s_out = teacher.o_proj(l, student_layer.read_out(t, s_logp.exp(), c_read))
+            probs = s_logp.exp()
+            if raw_mask is not None and student_layer.split_readers:
+                rm = raw_mask[:, None, None, :].to(probs.dtype)
+                o_read = student_layer.read_out(t, probs * rm, c_read, final=False) + student_layer.read_out(t, probs * (1 - rm), c_read, final=True)
+            else:
+                o_read = student_layer.read_out(t, probs, c_read, final=is_final)
+            s_out = teacher.o_proj(l, o_read)
         out = ((s_out.float() - t_out) ** 2).sum(-1).mean() / (t_out ** 2).sum(-1).mean().clamp_min(1e-6)
         if backward:
             (kl_w * kl + out_w * out).backward(retain_graph=t < T - 1)
@@ -120,7 +133,7 @@ def main():
     teacher = Teacher(args.model_path, args.loops, device)
     cfg = teacher.cfg
     student = LatentStudent(cfg.num_hidden_layers, cfg.hidden_size, cfg.num_attention_heads, cfg.head_dim, args.loops, args.rank, args.d_rope,
-                            args.writer, args.rank_v, args.pos, args.finalize, args.rank1).to(device)
+                            args.writer, args.rank_v, args.pos, args.finalize, args.rank1, args.split_readers).to(device)
     train = np.load(Path(args.data_dir) / "train.npy", mmap_mode="r"); dev = np.load(Path(args.data_dir) / "dev.npy")
     init_info = None
     if args.init == "teacher":

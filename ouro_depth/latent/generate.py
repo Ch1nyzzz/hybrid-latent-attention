@@ -108,11 +108,17 @@ class LatentDecoder:
                 cos_k = torch.cat([self.cos_all[:, :n].expand(B, -1, -1), cos_q], 1)
                 sin_k = torch.cat([self.sin_all[:, :n].expand(B, -1, -1), sin_q], 1)
                 q = attn.q_proj(h).view(B, 1, -1, attn.head_dim).transpose(1, 2)
-                logits = sl.scores(current_ut, q, h, keys, cos_k, sin_k, cos_q, sin_q).float()   # (B, H, 1, n+1)
+                logits = sl.scores(current_ut, q, h, keys, cos_k, sin_k, cos_q, sin_q, final=True).float()   # history: cached finals
+                if sl.split_readers and not (current_ut == 0 and sl.rank1):        # self key: in-progress register, lockstep reader set
+                    logits[..., -1:] = sl.scores(current_ut, q, h, keys[:, -1:], cos_q, sin_q, cos_q, sin_q, final=False).float()
                 valid = torch.cat([torch.arange(n, device=dev)[None] < lens[:, None], torch.ones(B, 1, dtype=torch.bool, device=dev)], 1)
                 logits = logits.masked_fill(~valid[:, None, None, :], -1e4)
                 probs = F.softmax(logits, -1).to(h.dtype)
-                return attn.o_proj(sl.read_out(current_ut, probs, keys)), None
+                if sl.split_readers and not (current_ut == 0 and sl.rank1):
+                    out = sl.read_out(current_ut, probs[..., :-1], keys[:, :-1], final=True) + sl.read_out(current_ut, probs[..., -1:], keys[:, -1:], final=False)
+                else:
+                    out = sl.read_out(current_ut, probs, keys, final=True)
+                return attn.o_proj(out), None
 
             return forward
 

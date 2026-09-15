@@ -66,6 +66,8 @@ def teacher_init(student: LatentStudent, teacher: Teacher, blocks, device: torch
         sl.q_absorb.copy_(A[None].expand(cfg["loops"], -1, -1, -1))
         sl.out_absorb.copy_(Bm[None].expand(cfg["loops"], -1, -1, -1))
         sl.gate.weight.zero_(); sl.gate.bias.fill_(8.0)
+        if sl.split_readers:
+            sl.q_absorb_d.copy_(sl.q_absorb); sl.out_absorb_d.copy_(sl.out_absorb)
         if r1:
             cand1, A1, B1 = fill(covk1[l], covv1[l], Wk, Wv, r1, r1)
             sl.cand1.weight.copy_(cand1.to(sl.cand1.weight.dtype)); sl.q_absorb1.copy_(A1); sl.out_absorb1.copy_(B1)
