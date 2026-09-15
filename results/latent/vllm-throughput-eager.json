@@ -26,5 +26,19 @@
   "tok_per_s": 528.8,
   "tokens_per_seq": 512,
   "eager": true
+ },
+ {
+  "model": "latent 256 FA (S6 stage1, sync code)",
+  "seqs": 32,
+  "tok_per_s": 254.8,
+  "tokens_per_seq": 512,
+  "eager": true
+ },
+ {
+  "model": "latent 256 Triton (S6 stage1, sync code)",
+  "seqs": 32,
+  "tok_per_s": 211.6,
+  "tokens_per_seq": 512,
+  "eager": true
  }
 ]
