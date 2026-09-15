@@ -30,6 +30,7 @@ def parse():
     p.add_argument("--rank-v", type=int, default=0, help="separate V latent size (0 = share the K latent, MLA-style)")
     p.add_argument("--pos", default="decoupled", choices=["decoupled", "latent"], help="K positional scheme")
     p.add_argument("--init", default="random", choices=["random", "teacher"], help="teacher: SVD/selector init from the frozen weights (pos=latent, rank_v>0)")
+    p.add_argument("--finalize", action="store_true", help="exit transform: readers at depth != writer depth read Phi(c), lockstep reads raw c")
     p.add_argument("--init-blocks", type=int, default=8)
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--accum", type=int, default=1)
     p.add_argument("--steps", type=int, default=0, help="0 = one pass over the training blocks")
@@ -48,7 +49,8 @@ def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer
     T = len(h_loops)
     dev_type = h_loops[0].device.type
     with torch.autocast(dev_type, dtype=torch.bfloat16):
-        regs = student_layer.write(h_loops)                    # (T, B, L, rank+rank_v)
+        regs = student_layer.write(h_loops)                    # (T, B, L, rank+rank_v), raw (lockstep) registers
+        fin = student_layer.finalize(regs)                     # registers as cached after exit
     kls, outs = [], []
     for t in range(T):
         h = h_loops[t]
@@ -58,10 +60,11 @@ def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer
             t_logp = F.log_softmax(t_logits, -1); del t_logits
             t_out = teacher.out[l][t].float()
         if writer_depth is None:
-            c_read = regs[tau_fixed]
+            c_read = regs[t] if tau_fixed == t else fin[tau_fixed]
         else:
             idx = writer_depth[t]                                                # (B, L)
-            c_read = torch.gather(regs, 0, idx[None, :, :, None].expand(1, *idx.shape, regs.shape[-1]))[0]
+            c_fin = torch.gather(fin, 0, idx[None, :, :, None].expand(1, *idx.shape, fin.shape[-1]))[0]
+            c_read = torch.where((idx == t)[..., None], regs[t], c_fin)
         with torch.autocast(dev_type, dtype=torch.bfloat16):
             s_logits = student_layer.scores(t, q, h, c_read, cos, sin)
         s_logp = F.log_softmax(s_logits.float() + bias, -1); del s_logits
@@ -113,7 +116,7 @@ def main():
     teacher = Teacher(args.model_path, args.loops, device)
     cfg = teacher.cfg
     student = LatentStudent(cfg.num_hidden_layers, cfg.hidden_size, cfg.num_attention_heads, cfg.head_dim, args.loops, args.rank, args.d_rope,
-                            args.writer, args.rank_v, args.pos).to(device)
+                            args.writer, args.rank_v, args.pos, args.finalize).to(device)
     train = np.load(Path(args.data_dir) / "train.npy", mmap_mode="r"); dev = np.load(Path(args.data_dir) / "dev.npy")
     init_info = None
     if args.init == "teacher":

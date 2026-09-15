@@ -30,6 +30,7 @@ def parse():
     p.add_argument("--student", default="", help="stage-1 checkpoint to start from (empty = fresh student, needs --rank etc.)")
     p.add_argument("--rank", type=int, default=512); p.add_argument("--d-rope", type=int, default=64); p.add_argument("--rank-v", type=int, default=0)
     p.add_argument("--pos", default="decoupled"); p.add_argument("--writer", default="register"); p.add_argument("--loops", type=int, default=4)
+    p.add_argument("--finalize", action="store_true")
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--steps", type=int, default=600)
     p.add_argument("--lr", type=float, default=3e-4); p.add_argument("--warmup", type=int, default=50); p.add_argument("--weight-decay", type=float, default=0.01)
     p.add_argument("--lam-attn", type=float, default=0.5); p.add_argument("--p-exit", type=float, default=0.0)
@@ -95,7 +96,7 @@ def main():
         student = LatentStudent(**scfg).to(device); student.load_state_dict(ck["student"]); start_step = ck.get("step")
     else:
         student = LatentStudent(cfgm.num_hidden_layers, cfgm.hidden_size, cfgm.num_attention_heads, cfgm.head_dim, args.loops, args.rank, args.d_rope,
-                                args.writer, args.rank_v, args.pos).to(device); start_step = None
+                                args.writer, args.rank_v, args.pos, args.finalize).to(device); start_step = None
     params = list(student.parameters())
     if rank == 0:
         print(json.dumps({"STAGE2_CFG": vars(args) | {"student_cfg": student.cfg, "student_params": sum(p.numel() for p in params), "from_step": start_step, "world": world}}), flush=True)

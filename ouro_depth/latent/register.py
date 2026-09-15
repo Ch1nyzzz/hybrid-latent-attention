@@ -46,12 +46,15 @@ class LatentLayer(nn.Module):
     """Writer (shared over loops) + per-loop readers for one decoder layer."""
 
     def __init__(self, hidden: int, heads: int, head_dim: int, loops: int, rank: int, d_rope: int, writer: str = "register",
-                 rank_v: int = 0, pos: str = "decoupled"):
+                 rank_v: int = 0, pos: str = "decoupled", finalize: bool = False):
         super().__init__()
         assert pos in ("decoupled", "latent") and (pos == "decoupled" or rank % 2 == 0)
         self.hidden, self.heads, self.head_dim, self.loops, self.rank, self.d_rope, self.writer = hidden, heads, head_dim, loops, rank, d_rope, writer
-        self.rank_v, self.pos = rank_v, pos
+        self.rank_v, self.pos, self.use_finalize = rank_v, pos, finalize
         state = rank + rank_v
+        if finalize:  # exit transform Phi(c) = c + MLP(c), identity at init; applied once when a token stops looping
+            self.finalize_mlp = nn.Sequential(nn.Linear(state, state), nn.GELU(), nn.Linear(state, state))
+            nn.init.zeros_(self.finalize_mlp[2].weight); nn.init.zeros_(self.finalize_mlp[2].bias)
         self.cand = nn.Linear(hidden, state, bias=False)                 # G(h_t)
         self.gate = nn.Linear(hidden + state, state)                     # sigma(W_g [c ; h_t])
         self.q_absorb = nn.Parameter(torch.empty(loops, heads, head_dim, rank))   # A_t per head: head_dim -> rank
@@ -79,6 +82,10 @@ class LatentLayer(nn.Module):
                 c = (1 - g) * prev + g * u
             regs.append(c)
         return torch.stack(regs)
+
+    def finalize(self, c: Tensor) -> Tensor:
+        """Register as stored in the cache after the token exits (read by readers at other depths)."""
+        return c + self.finalize_mlp(c) if self.use_finalize else c
 
     # ---- readers -------------------------------------------------------------------------------------------
     def scores(self, t: int, q: Tensor, h: Tensor, c_read: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
@@ -112,11 +119,11 @@ class LatentLayer(nn.Module):
 
 class LatentStudent(nn.Module):
     def __init__(self, num_layers: int, hidden: int, heads: int, head_dim: int, loops: int, rank: int, d_rope: int,
-                 writer: str = "register", rank_v: int = 0, pos: str = "decoupled"):
+                 writer: str = "register", rank_v: int = 0, pos: str = "decoupled", finalize: bool = False):
         super().__init__()
-        self.layers = nn.ModuleList(LatentLayer(hidden, heads, head_dim, loops, rank, d_rope, writer, rank_v, pos) for _ in range(num_layers))
+        self.layers = nn.ModuleList(LatentLayer(hidden, heads, head_dim, loops, rank, d_rope, writer, rank_v, pos, finalize) for _ in range(num_layers))
         self.cfg = dict(num_layers=num_layers, hidden=hidden, heads=heads, head_dim=head_dim, loops=loops, rank=rank, d_rope=d_rope,
-                        writer=writer, rank_v=rank_v, pos=pos)
+                        writer=writer, rank_v=rank_v, pos=pos, finalize=finalize)
 
     def cache_bytes_per_token(self, dtype_bytes: int = 2) -> int:
         c = self.cfg

@@ -39,7 +39,7 @@ class Swapped:
             cos, sin = position_embeddings
             B, L, _ = hidden_states.shape
             h = hidden_states
-            # ---- write: lockstep register update, frozen after exit_loop
+            # ---- write: lockstep register update; at exit_loop the register is finalised and frozen for later loops
             if self.exit_loop is None or current_ut < self.exit_loop:
                 u = sl.cand(h)
                 if sl.writer == "final":
@@ -50,8 +50,11 @@ class Swapped:
                     prev = self.regs[i] if self.regs[i] is not None else torch.zeros_like(u)
                     g = torch.sigmoid(sl.gate(torch.cat([prev, h], -1)))
                     c = (1 - g) * prev + g * u
-                self.regs[i] = c
-            c = self.regs[i]
+                self.regs[i] = sl.finalize(c) if (self.exit_loop is not None and current_ut == self.exit_loop - 1) else c
+                c_now = c  # this loop's readers see the raw (lockstep) register
+            else:
+                c_now = self.regs[i]  # frozen, finalised register of exited history tokens
+            c = c_now
             # ---- read
             q = attn.q_proj(h).view(B, L, -1, attn.head_dim).transpose(1, 2)   # pre-RoPE query
             logits = sl.scores(current_ut, q, h, c, cos, sin).float()
