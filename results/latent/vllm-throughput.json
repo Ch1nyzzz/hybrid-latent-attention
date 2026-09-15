@@ -232,5 +232,46 @@
   "tok_per_s": 1371.7,
   "tokens_per_seq": 512,
   "eager": true
+ },
+ {
+  "model": "latent 512 Flex (S5 stage3b)",
+  "seqs": 128,
+  "prompt_tokens": 4096,
+  "tok_per_s": 41.7,
+  "tokens_per_seq": 512,
+  "eager": true,
+  "ignore_eos": true
+ },
+ {
+  "model": "base exact KV, Triton",
+  "seqs": 32,
+  "prompt_tokens": 4096,
+  "tok_per_s": 166.3,
+  "tokens_per_seq": 512,
+  "eager": true,
+  "ignore_eos": true
+ },
+ {
+  "model": "base exact KV, Triton",
+  "seqs": 128,
+  "prompt_tokens": 4096,
+  "tok_per_s": 205.9,
+  "tokens_per_seq": 512,
+  "eager": true,
+  "ignore_eos": true
+ },
+ {
+  "model": "latent 512 Triton (patched tiles, short uniform prompts)",
+  "seqs": 32,
+  "tok_per_s": 303.6,
+  "tokens_per_seq": 512,
+  "eager": true
+ },
+ {
+  "model": "latent 512 Triton (patched tiles, short uniform prompts)",
+  "seqs": 128,
+  "tok_per_s": 1340.4,
+  "tokens_per_seq": 512,
+  "eager": true
  }
 ]
