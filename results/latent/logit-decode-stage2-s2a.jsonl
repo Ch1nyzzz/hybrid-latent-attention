@@ -1,0 +1,1 @@
+{"LOGIT_KL": {"1": {"kl": 0.2333, "top1_agree": 0.8292, "nll_teacher": 1.0297, "nll_swapped": 1.2359}, "2": {"kl": 0.2585, "top1_agree": 0.854, "nll_teacher": 1.0297, "nll_swapped": 1.255}, "3": {"kl": 0.2315, "top1_agree": 0.8683, "nll_teacher": 1.0297, "nll_swapped": 1.2315}, "None": {"kl": 0.2051, "top1_agree": 0.8721, "nll_teacher": 1.0297, "nll_swapped": 1.2068}}}
