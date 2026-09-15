@@ -27,8 +27,8 @@ INSTR = "\nPlease reason step by step, and put your final answer within \\boxed{
 class LatentDecoder:
     """Batched incremental decode over per-layer register caches."""
 
-    def __init__(self, model, student: LatentStudent, max_len: int):
-        self.model, self.student = model, student
+    def __init__(self, model, student: LatentStudent, max_len: int, self_final: bool = False):
+        self.model, self.student, self.self_final = model, student, self_final
         self.layers = model.model.layers[: model.config.num_hidden_layers]
         self.T = model.config.total_ut_steps
         self.reg_dim = student.cfg["rank"] + student.cfg["rank_v"]
@@ -109,12 +109,12 @@ class LatentDecoder:
                 sin_k = torch.cat([self.sin_all[:, :n].expand(B, -1, -1), sin_q], 1)
                 q = attn.q_proj(h).view(B, 1, -1, attn.head_dim).transpose(1, 2)
                 logits = sl.scores(current_ut, q, h, keys, cos_k, sin_k, cos_q, sin_q, final=True).float()   # history: cached finals
-                if sl.split_readers and not (current_ut == 0 and sl.rank1):        # self key: in-progress register, lockstep reader set
+                if sl.split_readers and not self.self_final and not (current_ut == 0 and sl.rank1):   # self key with the lockstep reader set
                     logits[..., -1:] = sl.scores(current_ut, q, h, keys[:, -1:], cos_q, sin_q, cos_q, sin_q, final=False).float()
                 valid = torch.cat([torch.arange(n, device=dev)[None] < lens[:, None], torch.ones(B, 1, dtype=torch.bool, device=dev)], 1)
                 logits = logits.masked_fill(~valid[:, None, None, :], -1e4)
                 probs = F.softmax(logits, -1).to(h.dtype)
-                if sl.split_readers and not (current_ut == 0 and sl.rank1):
+                if sl.split_readers and not self.self_final and not (current_ut == 0 and sl.rank1):
                     out = sl.read_out(current_ut, probs[..., :-1], keys[:, :-1], final=True) + sl.read_out(current_ut, probs[..., -1:], keys[:, -1:], final=False)
                 else:
                     out = sl.read_out(current_ut, probs, keys, final=True)
@@ -168,7 +168,7 @@ def main():
     p.add_argument("--student", default="", help="latent student checkpoint; empty = base model")
     p.add_argument("--loops", type=int, default=4); p.add_argument("--max-new", type=int, default=3072); p.add_argument("--batch", type=int, default=16)
     p.add_argument("--n", type=int, default=1, help="samples per problem (avg@n / pass@n)"); p.add_argument("--temperature", type=float, default=0.0); p.add_argument("--top-p", type=float, default=1.0)
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--seed", type=int, default=0); p.add_argument("--self-final", action="store_true", help="decode: self key read with the final-register reader set")
     p.add_argument("--shard", type=int, default=0); p.add_argument("--nshards", type=int, default=1); p.add_argument("--limit", type=int, default=0)
     args = p.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -181,7 +181,7 @@ def main():
     student = None
     if args.student:
         ck = torch.load(args.student, map_location="cpu"); student = LatentStudent(**ck["cfg"]).to(device).eval(); student.load_state_dict(ck["student"])
-    dec = LatentDecoder(model, student, max_len=4096 + args.max_new) if student is not None else None
+    dec = LatentDecoder(model, student, max_len=4096 + args.max_new, self_final=args.self_final) if student is not None else None
     out_dir = Path(args.output); out_dir.mkdir(parents=True, exist_ok=True)
     fout = open(out_dir / f"shard{args.shard}.jsonl", "w")
     torch.manual_seed(args.seed + args.shard)

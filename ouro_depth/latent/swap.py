@@ -76,9 +76,11 @@ class SwappedDecode(Swapped):
     history j < i (``hist``, from a previous pass; finalized if the history exited early) and to its own current-loop
     register. This is exactly what incremental generation sees; the lockstep ``Swapped`` is what prompt prefill sees."""
 
-    def __init__(self, model, student: LatentStudent, hist: list[Tensor]):
+    def __init__(self, model, student: LatentStudent, hist: list[Tensor], self_final: bool = False):
+        """self_final: read the token's own in-progress register with the final-register reader set too (one reader map per
+        attention call, as a paged-attention kernel needs); default keeps the lockstep set for the self key."""
         super().__init__(model, student, None)
-        self.hist = hist
+        self.hist = hist; self.self_final = self_final
 
     def _make(self, i: int):
         attn, sl = self.layers[i].self_attn, self.student.layers[i]
@@ -104,12 +106,12 @@ class SwappedDecode(Swapped):
                 hist = self.hist[i][..., :state].to(c.dtype)
             q = attn.q_proj(h).view(B, L, -1, attn.head_dim).transpose(1, 2)
             s_hist = sl.scores(current_ut, q, h, hist, cos, sin, final=True).float()   # (B, H, L, L) vs cached final registers
-            s_self = sl.scores(current_ut, q, h, c, cos, sin, final=False).float()     # own in-progress register (diagonal only)
+            s_self = sl.scores(current_ut, q, h, c, cos, sin, final=self.self_final).float()   # own in-progress register (diagonal only)
             eye = torch.eye(L, device=h.device, dtype=torch.bool)
             strict = torch.tril(torch.ones(L, L, device=h.device, dtype=torch.bool), -1)
             logits = torch.where(strict, s_hist, torch.where(eye, s_self, torch.full_like(s_hist, -1e4)))
             probs = F.softmax(logits, -1).to(h.dtype)
-            out = sl.read_out(current_ut, probs * strict, hist, final=True) + sl.read_out(current_ut, probs * eye, c, final=False)
+            out = sl.read_out(current_ut, probs * strict, hist, final=True) + sl.read_out(current_ut, probs * eye, c, final=self.self_final)
             out = attn.o_proj(out)
             self.last_attn = out
             return out, None
@@ -118,10 +120,11 @@ class SwappedDecode(Swapped):
 
 
 @torch.no_grad()
-def final_registers(model, student: LatentStudent, ids: Tensor, exit_loop: int | None = None, hist: list[Tensor] | None = None) -> list[Tensor]:
+def final_registers(model, student: LatentStudent, ids: Tensor, exit_loop: int | None = None, hist: list[Tensor] | None = None,
+                    self_final: bool = False) -> list[Tensor]:
     """One pass (lockstep, or decode-structured if ``hist`` is given) -> per-layer registers as stored after the pass
     (finalized at ``exit_loop`` for early-exit history)."""
-    sw = SwappedDecode(model, student, hist) if hist is not None else Swapped(model, student, exit_loop)
+    sw = SwappedDecode(model, student, hist, self_final) if hist is not None else Swapped(model, student, exit_loop)
     try:
         model.model(input_ids=ids, use_cache=False)
     finally:
@@ -191,7 +194,7 @@ def trace_hidden(model, student: LatentStudent, ids: Tensor, layers: set[int] | 
 
 @torch.no_grad()
 def logit_kl(model, student: LatentStudent, ids: Tensor, exit_loops: list[int | None], layers: set[int] | None = None,
-             decode: bool = False, passes: int = 2, exit_target: str = "full") -> dict:
+             decode: bool = False, passes: int = 2, exit_target: str = "full", self_final: bool = False) -> dict:
     """Teacher vs swapped final-loop logits on one batch. Returns per exit_loop: mean KL(teacher||swapped),
     top-1 agreement, teacher NLL and swapped NLL of the next token.
     decode=True evaluates the decode structure: history = final registers of a previous pass (``passes`` passes in total,
@@ -215,8 +218,8 @@ def logit_kl(model, student: LatentStudent, ids: Tensor, exit_loops: list[int | 
         if decode:
             hist = final_registers(model, student, ids, ex)
             for _ in range(passes - 2):
-                hist = final_registers(model, student, ids, ex, hist)
-            sw = SwappedDecode(model, student, hist)
+                hist = final_registers(model, student, ids, ex, hist, self_final)
+            sw = SwappedDecode(model, student, hist, self_final)
         else:
             sw = Swapped(model, student, ex, layers)
         try:

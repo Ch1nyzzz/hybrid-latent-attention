@@ -35,6 +35,7 @@ def parse():
     p.add_argument("--p-lockstep", type=float, default=0.25, help="decode-mode only: fraction of batches trained lockstep (prompt prefill regime)")
     p.add_argument("--eval-decode", action="store_true", help="also report the decode-structured logit KL at every eval (no decode-mode training)")
     p.add_argument("--exit-target", default="full", choices=["full", "reuse"], help="teacher for early-exit batches: full depth, or K/V reused from the exit loop")
+    p.add_argument("--self-final", action="store_true", help="decode structure: the self key is read with the final-register reader set too (kernel-friendly)")
     p.add_argument("--train-only", default="all", choices=["all", "decode_readers"],
                    help="decode_readers: freeze the writer and the lockstep readers, train only the final-register reader set (A'/B') — use with --decode-mode")
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--steps", type=int, default=600)
@@ -135,7 +136,7 @@ def main():
             with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16):
                 for i in range(0, len(dev), 2):
                     ids = torch.from_numpy(dev[i:i + 2].astype(np.int64)).to(device)
-                    r = logit_kl(model, student, ids, exits, decode=dec, exit_target=args.exit_target)
+                    r = logit_kl(model, student, ids, exits, decode=dec, exit_target=args.exit_target, self_final=args.self_final)
                     for k, v in r.items(): acc[k] += torch.tensor([v["kl"], v["top1_agree"], v["nll_teacher"], v["nll_swapped"]], device=device)
                     n += 1
             n_t = torch.tensor([n], device=device, dtype=torch.float)
@@ -175,7 +176,7 @@ def main():
         if decode:
             with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16):
                 hist = final_registers(model, student, ids, exit_loop)
-            sw = SwappedDecode(model, student, hist)
+            sw = SwappedDecode(model, student, hist, args.self_final)
         else:
             sw = Swapped(model, student, exit_loop)
         try:

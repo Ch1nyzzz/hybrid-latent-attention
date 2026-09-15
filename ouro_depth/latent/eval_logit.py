@@ -23,7 +23,7 @@ def main():
     p.add_argument("--swap-layers", default="", help="comma list of layer indices to swap (default all)")
     p.add_argument("--trace", action="store_true", help="also report per-sublayer hidden-state relative error on the first batch")
     p.add_argument("--decode", action="store_true", help="decode-structured evaluation (history = final registers, self = current loop)")
-    p.add_argument("--passes", type=int, default=2)
+    p.add_argument("--passes", type=int, default=2); p.add_argument("--self-final", action="store_true")
     args = p.parse_args()
     layers = {int(x) for x in args.swap_layers.split(",") if x} or None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -42,7 +42,7 @@ def main():
                 trace = trace_hidden(model, student, ids, layers)
                 nL = cfg["num_layers"]
                 print(json.dumps({"TRACE": {f"loop{t}": [round(x, 3) for x in trace[t * nL:(t + 1) * nL]] for t in range(cfg["loops"])}}), flush=True)
-            r = logit_kl(model, student, ids, exits, layers, decode=args.decode, passes=args.passes)
+            r = logit_kl(model, student, ids, exits, layers, decode=args.decode, passes=args.passes, self_final=args.self_final)
         for k, v in r.items():
             for m in v: acc[k][m] += v[m]
         n += 1
