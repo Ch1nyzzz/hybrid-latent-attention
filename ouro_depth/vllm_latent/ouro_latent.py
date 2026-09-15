@@ -31,7 +31,7 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead, VocabParallelEmbedding
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
-from vllm.attention.ops.triton_reshape_and_cache_flash import triton_reshape_and_cache_flash
+from vllm.v1.attention.ops.triton_reshape_and_cache_flash import triton_reshape_and_cache_flash
 from vllm.sequence import IntermediateTensors
 from vllm.v1.attention.backend import AttentionType
 
