@@ -22,6 +22,8 @@ def main():
     p.add_argument("--output", required=True); p.add_argument("--blocks", type=int, default=64); p.add_argument("--micro-batch", type=int, default=2)
     p.add_argument("--swap-layers", default="", help="comma list of layer indices to swap (default all)")
     p.add_argument("--trace", action="store_true", help="also report per-sublayer hidden-state relative error on the first batch")
+    p.add_argument("--decode", action="store_true", help="decode-structured evaluation (history = final registers, self = current loop)")
+    p.add_argument("--passes", type=int, default=2)
     args = p.parse_args()
     layers = {int(x) for x in args.swap_layers.split(",") if x} or None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -40,14 +42,14 @@ def main():
                 trace = trace_hidden(model, student, ids, layers)
                 nL = cfg["num_layers"]
                 print(json.dumps({"TRACE": {f"loop{t}": [round(x, 3) for x in trace[t * nL:(t + 1) * nL]] for t in range(cfg["loops"])}}), flush=True)
-            r = logit_kl(model, student, ids, exits, layers)
+            r = logit_kl(model, student, ids, exits, layers, decode=args.decode, passes=args.passes)
         for k, v in r.items():
             for m in v: acc[k][m] += v[m]
         n += 1
         print("batch", i, {k: round(v["kl"] / n, 4) for k, v in acc.items()}, flush=True)
     res = {k: {m: v[m] / n for m in v} for k, v in acc.items()}
     res["rows"] = "history exit loop tau (None = full depth); logits taken at the final loop"; res["student"] = args.student; res["cfg"] = cfg; res["step"] = ck.get("step")
-    res["swap_layers"] = sorted(layers) if layers else "all"; res["trace"] = trace
+    res["swap_layers"] = sorted(layers) if layers else "all"; res["trace"] = trace; res["decode"] = args.decode; res["passes"] = args.passes
     out = Path(args.output); out.mkdir(parents=True, exist_ok=True)
     json.dump(res, open(out / "logit_kl.json", "w"), indent=1)
     print(json.dumps({"LOGIT_KL": {k: {m: round(x, 4) for m, x in v.items()} for k, v in res.items() if isinstance(v, dict) and "kl" in v}}), flush=True)

@@ -67,6 +67,62 @@ class Swapped:
         return forward
 
 
+class SwappedDecode(Swapped):
+    """Decode-structured reads in a full-sequence pass: every token i at loop t attends to the FINAL registers of its
+    history j < i (``hist``, from a previous pass; finalized if the history exited early) and to its own current-loop
+    register. This is exactly what incremental generation sees; the lockstep ``Swapped`` is what prompt prefill sees."""
+
+    def __init__(self, model, student: LatentStudent, hist: list[Tensor]):
+        super().__init__(model, student, None)
+        self.hist = hist
+
+    def _make(self, i: int):
+        attn, sl = self.layers[i].self_attn, self.student.layers[i]
+
+        def forward(hidden_states, position_embeddings, attention_mask=None, current_ut: int = 0, **_):
+            cos, sin = position_embeddings
+            B, L, _ = hidden_states.shape
+            h = hidden_states
+            u = sl.cand(h)
+            if sl.writer == "final":
+                c = u
+            elif sl.writer == "first":
+                c = self.regs[i] if self.regs[i] is not None else u
+            else:
+                prev = self.regs[i] if self.regs[i] is not None else torch.zeros_like(u)
+                g = torch.sigmoid(sl.gate(torch.cat([prev, h], -1)))
+                c = (1 - g) * prev + g * u
+            self.regs[i] = c
+            q = attn.q_proj(h).view(B, L, -1, attn.head_dim).transpose(1, 2)
+            hist = self.hist[i].to(c.dtype)
+            s_hist = sl.scores(current_ut, q, h, hist, cos, sin).float()          # (B, H, L, L) vs final history registers
+            s_self = sl.scores(current_ut, q, h, c, cos, sin).float()             # only the diagonal is used
+            eye = torch.eye(L, device=h.device, dtype=torch.bool)
+            strict = torch.tril(torch.ones(L, L, device=h.device, dtype=torch.bool), -1)
+            logits = torch.where(strict, s_hist, torch.where(eye, s_self, torch.full_like(s_hist, -1e4)))
+            probs = F.softmax(logits, -1).to(h.dtype)
+            out = sl.read_out(current_ut, probs * strict, hist) + sl.read_out(current_ut, probs * eye, c)
+            out = attn.o_proj(out)
+            self.last_attn = out
+            return out, None
+
+        return forward
+
+
+@torch.no_grad()
+def final_registers(model, student: LatentStudent, ids: Tensor, exit_loop: int | None = None, hist: list[Tensor] | None = None) -> list[Tensor]:
+    """One pass (lockstep, or decode-structured if ``hist`` is given) -> per-layer registers as stored after the pass
+    (finalized at ``exit_loop`` for early-exit history)."""
+    sw = SwappedDecode(model, student, hist) if hist is not None else Swapped(model, student, exit_loop)
+    try:
+        model.model(input_ids=ids, use_cache=False)
+    finally:
+        sw.restore()
+    if hist is None and exit_loop is not None:
+        return [r for r in sw.regs]            # Swapped already finalised at the exit loop
+    return [student.layers[i].finalize(sw.regs[i]) for i in range(len(sw.regs))]
+
+
 @torch.no_grad()
 def trace_hidden(model, student: LatentStudent, ids: Tensor, layers: set[int] | None = None) -> list[float]:
     """Relative error ||h_swap - h_teacher|| / ||h_teacher|| of every decoder-layer output, in execution order
@@ -86,9 +142,12 @@ def trace_hidden(model, student: LatentStudent, ids: Tensor, layers: set[int] | 
 
 
 @torch.no_grad()
-def logit_kl(model, student: LatentStudent, ids: Tensor, exit_loops: list[int | None], layers: set[int] | None = None) -> dict:
+def logit_kl(model, student: LatentStudent, ids: Tensor, exit_loops: list[int | None], layers: set[int] | None = None,
+             decode: bool = False, passes: int = 2) -> dict:
     """Teacher vs swapped final-loop logits on one batch. Returns per exit_loop: mean KL(teacher||swapped),
-    top-1 agreement, teacher NLL and swapped NLL of the next token."""
+    top-1 agreement, teacher NLL and swapped NLL of the next token.
+    decode=True evaluates the decode structure: history = final registers of a previous pass (``passes`` passes in total,
+    the first lockstep), self = current-loop register."""
     tgt = ids[:, 1:]
 
     def final_logits():  # final-loop hidden -> lm_head, bypassing the exit-gate mixture
@@ -98,7 +157,13 @@ def logit_kl(model, student: LatentStudent, ids: Tensor, exit_loops: list[int | 
     t_logp = F.log_softmax(final_logits(), -1)
     res = {}
     for ex in exit_loops:
-        sw = Swapped(model, student, ex, layers)
+        if decode:
+            hist = final_registers(model, student, ids, ex)
+            for _ in range(passes - 2):
+                hist = final_registers(model, student, ids, ex, hist)
+            sw = SwappedDecode(model, student, hist)
+        else:
+            sw = Swapped(model, student, ex, layers)
         try:
             s_logp = F.log_softmax(final_logits(), -1)
         finally:

@@ -20,7 +20,7 @@ from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
 from .register import LatentStudent
-from .swap import Swapped, logit_kl
+from .swap import Swapped, SwappedDecode, final_registers, logit_kl
 from .vendor_model import load_teacher
 
 
@@ -31,6 +31,8 @@ def parse():
     p.add_argument("--rank", type=int, default=512); p.add_argument("--d-rope", type=int, default=64); p.add_argument("--rank-v", type=int, default=0)
     p.add_argument("--pos", default="decoupled"); p.add_argument("--writer", default="register"); p.add_argument("--loops", type=int, default=4)
     p.add_argument("--finalize", action="store_true")
+    p.add_argument("--decode-mode", action="store_true", help="train on the decode structure: pass 1 (no grad, lockstep, with early exit) gives the final history registers; pass 2 (with grad) reads them")
+    p.add_argument("--p-lockstep", type=float, default=0.25, help="decode-mode only: fraction of batches trained lockstep (prompt prefill regime)")
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--steps", type=int, default=600)
     p.add_argument("--lr", type=float, default=3e-4); p.add_argument("--warmup", type=int, default=50); p.add_argument("--weight-decay", type=float, default=0.01)
     p.add_argument("--lam-attn", type=float, default=0.5); p.add_argument("--p-exit", type=float, default=0.0)
@@ -117,22 +119,26 @@ def main():
 
     def run_eval(step):
         student.eval(); exits = list(range(1, T)) + [None]
-        acc = {str(e): torch.zeros(4, device=device) for e in exits}; n = 0
-        with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16):
-            for i in range(0, len(dev), 2):
-                ids = torch.from_numpy(dev[i:i + 2].astype(np.int64)).to(device)
-                r = logit_kl(model, student, ids, exits)
-                for k, v in r.items(): acc[k] += torch.tensor([v["kl"], v["top1_agree"], v["nll_teacher"], v["nll_swapped"]], device=device)
-                n += 1
-        n_t = torch.tensor([n], device=device, dtype=torch.float)
-        if world > 1:
-            for v in acc.values(): dist.all_reduce(v)
-            dist.all_reduce(n_t)
-        res = {k: dict(zip(["kl", "top1_agree", "nll_teacher", "nll_swapped"], (v / n_t).tolist())) for k, v in acc.items()}
+        modes = [("lockstep", False), ("decode", True)] if args.decode_mode else [("lockstep", False)]
+        allres = {}
+        for name, dec in modes:
+            acc = {str(e): torch.zeros(4, device=device) for e in exits}; n = 0
+            with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16):
+                for i in range(0, len(dev), 2):
+                    ids = torch.from_numpy(dev[i:i + 2].astype(np.int64)).to(device)
+                    r = logit_kl(model, student, ids, exits, decode=dec)
+                    for k, v in r.items(): acc[k] += torch.tensor([v["kl"], v["top1_agree"], v["nll_teacher"], v["nll_swapped"]], device=device)
+                    n += 1
+            n_t = torch.tensor([n], device=device, dtype=torch.float)
+            if world > 1:
+                for v in acc.values(): dist.all_reduce(v)
+                dist.all_reduce(n_t)
+            allres[name] = {k: dict(zip(["kl", "top1_agree", "nll_teacher", "nll_swapped"], (v / n_t).tolist())) for k, v in acc.items()}
         student.train()
         if rank == 0:
-            json.dump({"step": step, **res}, open(out_dir / f"eval-{step}.json", "w"), indent=1)
-            print(json.dumps({"STAGE2_EVAL": {"step": step, **{k: {m: round(x, 4) for m, x in v.items()} for k, v in res.items()}}}), flush=True)
+            json.dump({"step": step, **allres}, open(out_dir / f"eval-{step}.json", "w"), indent=1)
+            for name, res in allres.items():
+                print(json.dumps({"STAGE2_EVAL": {"step": step, "mode": name, **{k: {m: round(x, 4) for m, x in v.items()} for k, v in res.items()}}}), flush=True)
 
     rng = np.random.default_rng(args.seed * 3 + 1)  # same exit schedule on every rank
     t0 = time.time(); step = 0
@@ -152,7 +158,13 @@ def main():
             t_logp = F.log_softmax(model.lm_head(hs[-1]).float(), -1)
         cap.on = False
         # student pass through the swapped model, loss, backward (forwards stay patched for recomputation)
-        sw = Swapped(model, student, exit_loop)
+        decode = args.decode_mode and rng.random() >= args.p_lockstep
+        if decode:
+            with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16):
+                hist = final_registers(model, student, ids, exit_loop)
+            sw = SwappedDecode(model, student, hist)
+        else:
+            sw = Swapped(model, student, exit_loop)
         try:
             with torch.autocast(device.type, dtype=torch.bfloat16):
                 s_logits, aux = swapped_forward(model, sw, ids, cap, args.lam_attn)
@@ -169,7 +181,7 @@ def main():
         gn = torch.nn.utils.clip_grad_norm_(params, 1.0).item()
         opt.step(); step += 1
         rec = {"step": step, "lr": lr_at(step - 1), "kl": round(kl.item(), 5), "attn_match": round(aux.item(), 5), "grad_norm": round(gn, 4),
-               "exit_loop": exit_loop, "tokens": step * per_step * ids.shape[1], "elapsed": round(time.time() - t0, 1)}
+               "exit_loop": exit_loop, "decode": decode, "tokens": step * per_step * ids.shape[1], "elapsed": round(time.time() - t0, 1)}
         log.write(json.dumps(rec) + "\n"); log.flush()
         if rank == 0 and (step % 10 == 0 or step <= 5): print(json.dumps({"STAGE2_STEP": rec}), flush=True)
         if step % args.eval_every == 0 or step == args.steps: run_eval(step)
