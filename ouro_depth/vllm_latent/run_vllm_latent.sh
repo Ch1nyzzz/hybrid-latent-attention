@@ -57,7 +57,7 @@ PY
     done ;;
   tp)  # throughput sweep over batch sizes: TP_SEQS="32 128", TP_ARGS may hold --base / --backend X
     for n in ${TP_SEQS:-32 128}; do echo "=== tp seqs=$n"
-      python ouro_depth/vllm_latent/compare.py --model "$MODEL" --student "$STUDENT" --out "$OUT/tp_$n" --throughput $n --tp-tokens ${TP_TOKENS:-512} ${TP_ARGS:-} 2>&1 | grep -E "^\{\"TP|COMPARE_DONE|Error|Traceback|KV cache size|Maximum concurrency|Using .* attention backend" | grep -vE "FutureWarning|LIBARCHIVE" | tail -8 || true
+      python ouro_depth/vllm_latent/compare.py --model "$MODEL" --student "$STUDENT" --out "$OUT/tp_$n" --throughput $n --tp-tokens ${TP_TOKENS:-512} --max-model-len ${TP_MAXLEN:-4096} ${TP_ARGS:-} 2>&1 | grep -E "^\{\"TP|COMPARE_DONE|Error|Traceback|KV cache size|Maximum concurrency|Using .* attention backend" | grep -vE "FutureWarning|LIBARCHIVE" | tail -8 || true
     done ;;
   matheval)  # one vLLM engine per GPU, problems sharded; MATHEVAL_ARGS e.g. "--backend FLEX_ATTENTION" or "--base"
     NGPU=$(nvidia-smi -L | wc -l); mkdir -p "$OUT/matheval"

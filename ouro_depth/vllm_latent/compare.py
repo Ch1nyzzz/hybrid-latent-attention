@@ -16,7 +16,7 @@ def main():
     p.add_argument("--loops", type=int, default=4); p.add_argument("--max-new", type=int, default=64); p.add_argument("--max-model-len", type=int, default=4096)
     p.add_argument("--backend", default="", help="VLLM_ATTENTION_BACKEND override, e.g. TRITON_ATTN or FLASH_ATTN")
     p.add_argument("--throughput", type=int, default=0, help="if > 0: run this many sampled generations of --tp-tokens tokens and report tok/s")
-    p.add_argument("--tp-tokens", type=int, default=1024)
+    p.add_argument("--tp-tokens", type=int, default=1024); p.add_argument("--tp-prompt-tokens", type=int, default=0, help="pad the throughput prompt to this many tokens (long-context regime)")
     p.add_argument("--compile-config", default="", help="JSON for vLLM compilation_config; when given, enforce_eager is off (CUDA graphs / torch.compile)")
     args = p.parse_args()
     from vllm import LLM, SamplingParams
@@ -53,10 +53,16 @@ def main():
         print(json.dumps({"CMP_SUMMARY": res["summary"]}), flush=True)
     if args.throughput:
         sp = SamplingParams(temperature=1.0, top_p=0.7, max_tokens=args.tp_tokens, seed=0)
-        prompts = ["Please write a long, detailed explanation of why the sky is blue, step by step."] * args.throughput
+        base_prompt = "Please write a long, detailed explanation of why the sky is blue, step by step."
+        if args.tp_prompt_tokens:
+            filler = tok.encode("The quick brown fox jumps over the lazy dog. ") * (args.tp_prompt_tokens // 8 + 1)
+            ids = (filler[: args.tp_prompt_tokens - 32] + tok.encode(base_prompt))[: args.tp_prompt_tokens]
+            prompts = [{"prompt_token_ids": ids} for _ in range(args.throughput)]
+        else:
+            prompts = [base_prompt] * args.throughput
         t0 = time.time(); outs = llm.generate(prompts, sp); dt = time.time() - t0
         ntok = sum(len(o.outputs[0].token_ids) for o in outs)
-        res["throughput"] = {"seqs": args.throughput, "tokens": ntok, "seconds": round(dt, 1), "tok_per_s": round(ntok / dt, 1)}
+        res["throughput"] = {"seqs": args.throughput, "prompt_tokens": args.tp_prompt_tokens, "tokens": ntok, "seconds": round(dt, 1), "tok_per_s": round(ntok / dt, 1)}
         print(json.dumps({"TP": res["throughput"]}), flush=True)
     json.dump(res, open(Path(args.out) / "compare.json", "w"), indent=1)
     print("COMPARE_DONE", flush=True)
