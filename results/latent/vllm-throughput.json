@@ -218,5 +218,19 @@
   "tokens_per_seq": 512,
   "eager": true,
   "ignore_eos": true
+ },
+ {
+  "model": "latent 512 Triton split prefill/decode (S5 stage3b)",
+  "seqs": 32,
+  "tok_per_s": 302.5,
+  "tokens_per_seq": 512,
+  "eager": true
+ },
+ {
+  "model": "latent 512 Triton split prefill/decode (S5 stage3b)",
+  "seqs": 128,
+  "tok_per_s": 1371.7,
+  "tokens_per_seq": 512,
+  "eager": true
  }
 ]
