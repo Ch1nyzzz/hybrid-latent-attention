@@ -19,10 +19,20 @@ try:
     print("IMPORT_OK", OuroForCausalLM)
     info = R._ModelInfo.from_model_cls(OuroForCausalLM)
     print("MODEL_INFO", {k: getattr(info, k) for k in dir(info) if not k.startswith("_") and not callable(getattr(info, k))})
-    import inspect
+    import inspect, importlib.util
     from vllm.model_executor.models import interfaces_base as IB
-    print("IS_TEXT_GEN_SRC", inspect.getsource(IB.is_text_generation_model)[:1200])
-    print("SUPPORTS_PROTO", [n for n in dir(IB) if "TextGeneration" in n])
+    P = IB.VllmModelForTextGeneration
+    attrs = sorted(getattr(P, "__protocol_attrs__", set()))
+    print("PROTO_ATTRS", attrs)
+    print("MISSING_ATTRS", [a for a in attrs if not hasattr(OuroForCausalLM, a)])
+    print("IS_VLLM_MODEL", IB.is_vllm_model(OuroForCausalLM), "IS_TEXT_GEN", IB.is_text_generation_model(OuroForCausalLM))
+    print("FWD_SIG", str(inspect.signature(OuroForCausalLM.forward)), "INIT_SIG", str(inspect.signature(OuroForCausalLM.__init__)), "LOGITS_SIG", str(inspect.signature(OuroForCausalLM.compute_logits)))
+    spec = importlib.util.spec_from_file_location("ouro_orig", "$OUT/ouro.py.orig"); m = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(m); O = m.OuroForCausalLM
+        print("ORIG_IS_TEXT_GEN", IB.is_text_generation_model(O), "ORIG_MISSING", [a for a in attrs if not hasattr(O, a)], "ORIG_FWD", str(inspect.signature(O.forward)))
+    except Exception:
+        traceback.print_exc()
 except Exception:
     traceback.print_exc(); print("IMPORT_FAILED")
 PY
