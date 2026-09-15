@@ -29,6 +29,8 @@ def parse():
     p.add_argument("--writer", default="register", choices=["register", "final", "first"])
     p.add_argument("--rank-v", type=int, default=0, help="separate V latent size (0 = share the K latent, MLA-style)")
     p.add_argument("--pos", default="decoupled", choices=["decoupled", "latent"], help="K positional scheme")
+    p.add_argument("--init", default="random", choices=["random", "teacher"], help="teacher: SVD/selector init from the frozen weights (pos=latent, rank_v>0)")
+    p.add_argument("--init-blocks", type=int, default=8)
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--accum", type=int, default=1)
     p.add_argument("--steps", type=int, default=0, help="0 = one pass over the training blocks")
     p.add_argument("--lr", type=float, default=1e-3); p.add_argument("--warmup", type=int, default=50); p.add_argument("--weight-decay", type=float, default=0.01)
@@ -112,14 +114,18 @@ def main():
     cfg = teacher.cfg
     student = LatentStudent(cfg.num_hidden_layers, cfg.hidden_size, cfg.num_attention_heads, cfg.head_dim, args.loops, args.rank, args.d_rope,
                             args.writer, args.rank_v, args.pos).to(device)
+    train = np.load(Path(args.data_dir) / "train.npy", mmap_mode="r"); dev = np.load(Path(args.data_dir) / "dev.npy")
+    init_info = None
+    if args.init == "teacher":
+        from .init_teacher import teacher_init
+        init_info = teacher_init(student, teacher, dev[-args.init_blocks:], device)  # last dev blocks: never used for eval
     params = [p for p in student.parameters()]
     n_params = sum(p.numel() for p in params)
     if rank == 0:
-        print(json.dumps({"STAGE1_CFG": vars(args) | {"student_params": n_params, "cache_bytes_per_token": student.cache_bytes_per_token(),
+        print(json.dumps({"STAGE1_CFG": vars(args) | {"student_params": n_params, "init": init_info, "cache_bytes_per_token": student.cache_bytes_per_token(),
                "exact_kv_bytes_per_token_T": cfg.num_hidden_layers * 2 * cfg.num_key_value_heads * cfg.head_dim * 2 * args.loops, "world": world}}), flush=True)
     opt = torch.optim.AdamW(params, lr=args.lr, betas=(0.9, 0.95), weight_decay=args.weight_decay)
 
-    train = np.load(Path(args.data_dir) / "train.npy", mmap_mode="r"); dev = np.load(Path(args.data_dir) / "dev.npy")
     if args.smoke:
         train = train[:world * args.micro_batch * 3]; dev = dev[:8]
     dev = dev[: args.eval_blocks][rank::world]
