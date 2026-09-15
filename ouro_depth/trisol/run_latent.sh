@@ -30,6 +30,21 @@ case "${MODE:?MODE required}" in
     STUDENT=${STUDENT:-$(find /trisol/input/models -name 'student-*.pt' 2>/dev/null | sort -V | tail -1)}
     echo "student: ${STUDENT:-fresh}"
     torchrun --standalone --nproc_per_node="$NGPU" -m ouro_depth.latent.train_stage2 --model-path "$MODEL" --data-dir "$CORPUS" --output "$OUT/stage2" ${STUDENT:+--student "$STUDENT"} ${STAGE2_ARGS:-} ;;
+  matheval)  # greedy MATH500 with the latent cache (auxiliary model input holds student-*.pt) or the base model (BASE=1)
+    STUDENT=$([ "${BASE:-0}" = "1" ] && echo "" || find /trisol/input/models -name 'student-*.pt' 2>/dev/null | sort -V | tail -1)
+    echo "student: ${STUDENT:-BASE}"; mkdir -p "$OUT/matheval"
+    for i in $(seq 0 $((NGPU-1))); do
+      CUDA_VISIBLE_DEVICES=$i python -m ouro_depth.latent.generate --model-path "$MODEL" --data ouro_depth/matheval/data/math500.jsonl \
+        --output "$OUT/matheval" --shard $i --nshards "$NGPU" ${STUDENT:+--student "$STUDENT"} ${MATHEVAL_ARGS:-} > "$OUT/matheval/shard$i.log" 2>&1 &
+    done; wait
+    grep -h "GEN_SUMMARY" "$OUT/matheval"/shard*.log
+    python - "$OUT/matheval" <<'PY'
+import json, glob, sys
+d = sys.argv[1]; rows = [json.loads(l) for f in sorted(glob.glob(f"{d}/shard*.jsonl")) for l in open(f)]
+n = len(rows); print(json.dumps({"MATHEVAL_MERGED": {"n": n, "acc": sum(r["correct"] for r in rows) / max(1, n), "mean_tokens": sum(r["tokens"] for r in rows) / max(1, n),
+      "trunc_rate": sum(r["truncated"] for r in rows) / max(1, n)}}), flush=True)
+PY
+    ;;
   logit)  # student checkpoint from an auxiliary model input (--model NAME:CODE -> /trisol/input/models/model-0)
     STUDENT=${STUDENT:-$(find /trisol/input/models -name 'student-*.pt' | sort -V | tail -1)}
     echo "student: $STUDENT"

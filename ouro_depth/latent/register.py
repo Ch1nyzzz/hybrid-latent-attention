@@ -88,24 +88,30 @@ class LatentLayer(nn.Module):
         return c + self.finalize_mlp(c) if self.use_finalize else c
 
     # ---- readers -------------------------------------------------------------------------------------------
-    def scores(self, t: int, q: Tensor, h: Tensor, c_read: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
-        """Attention logits (B, H, L, L) of reader loop t.
+    def scores(self, t: int, q: Tensor, h: Tensor, c_read: Tensor, cos: Tensor, sin: Tensor,
+               cos_q: Tensor | None = None, sin_q: Tensor | None = None) -> Tensor:
+        """Attention logits (B, H, Lq, Lk) of reader loop t.
 
-        q: teacher's PRE-RoPE query (B, H, L, head_dim) from the frozen q_proj; h: (B, L, hidden);
-        c_read: (B, L, rank+rank_v) register seen by this reader; cos/sin: teacher RoPE tables (B, L, head_dim).
+        q: teacher's PRE-RoPE query (B, H, Lq, head_dim) from the frozen q_proj; h: (B, Lq, hidden);
+        c_read: (B, Lk, rank+rank_v) registers seen by this reader; cos/sin: RoPE tables of the KEY positions (B, Lk, head_dim);
+        cos_q/sin_q: RoPE tables of the query positions (default: same as the keys, i.e. Lq == Lk aligned).
         """
+        if cos_q is None:
+            cos_q, sin_q = cos, sin
         ck = c_read[..., : self.rank]
         qc = torch.einsum("bhid,hdr->bhir", q, self.q_absorb[t])                         # absorbed (NoPE) query
         if self.pos == "latent":
             cosL, sinL = rope_latent(cos, sin, self.rank)
-            qc = apply_rope(qc, cosL, sinL)
+            cosQ, sinQ = rope_latent(cos_q, sin_q, self.rank)
+            qc = apply_rope(qc, cosQ, sinQ)
             ck = ck * cosL + rotate_half(ck) * sinL
             return torch.einsum("bhir,bjr->bhij", qc, ck) / math.sqrt(self.head_dim)
         cos64, sin64 = rope_subset(cos, sin, self.d_rope)
+        cos64q, sin64q = rope_subset(cos_q, sin_q, self.d_rope)
         kr = self.rope_key(ck)
         kr = kr * cos64 + rotate_half(kr) * sin64
         qr = self.q_rope[t](h).view(*h.shape[:2], self.heads, self.d_rope).transpose(1, 2)
-        qr = apply_rope(qr, cos64, sin64)
+        qr = apply_rope(qr, cos64q, sin64q)
         return (torch.einsum("bhir,bjr->bhij", qc, ck) / math.sqrt(self.head_dim)
                 + torch.einsum("bhid,bjd->bhij", qr, kr) / math.sqrt(self.d_rope))
 
