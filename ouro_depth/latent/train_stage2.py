@@ -20,7 +20,7 @@ from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
 from .register import LatentStudent
-from .swap import Swapped, SwappedDecode, final_registers, logit_kl
+from .swap import Swapped, SwappedDecode, TeacherReuse, final_registers, logit_kl
 from .vendor_model import load_teacher
 
 
@@ -34,6 +34,7 @@ def parse():
     p.add_argument("--decode-mode", action="store_true", help="train on the decode structure: pass 1 (no grad, lockstep, with early exit) gives the final history registers; pass 2 (with grad) reads them")
     p.add_argument("--p-lockstep", type=float, default=0.25, help="decode-mode only: fraction of batches trained lockstep (prompt prefill regime)")
     p.add_argument("--eval-decode", action="store_true", help="also report the decode-structured logit KL at every eval (no decode-mode training)")
+    p.add_argument("--exit-target", default="full", choices=["full", "reuse"], help="teacher for early-exit batches: full depth, or K/V reused from the exit loop")
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--steps", type=int, default=600)
     p.add_argument("--lr", type=float, default=3e-4); p.add_argument("--warmup", type=int, default=50); p.add_argument("--weight-decay", type=float, default=0.01)
     p.add_argument("--lam-attn", type=float, default=0.5); p.add_argument("--p-exit", type=float, default=0.0)
@@ -128,7 +129,7 @@ def main():
             with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16):
                 for i in range(0, len(dev), 2):
                     ids = torch.from_numpy(dev[i:i + 2].astype(np.int64)).to(device)
-                    r = logit_kl(model, student, ids, exits, decode=dec)
+                    r = logit_kl(model, student, ids, exits, decode=dec, exit_target=args.exit_target)
                     for k, v in r.items(): acc[k] += torch.tensor([v["kl"], v["top1_agree"], v["nll_teacher"], v["nll_swapped"]], device=device)
                     n += 1
             n_t = torch.tensor([n], device=device, dtype=torch.float)
@@ -155,9 +156,13 @@ def main():
         exit_loop = int(rng.integers(1, T)) if rng.random() < args.p_exit else None
         # teacher pass (unpatched) with attention outputs captured
         cap.reset(); cap.on = True
-        with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16):
-            _, hs, _ = model.model(input_ids=ids, use_cache=False)
-            t_logp = F.log_softmax(model.lm_head(hs[-1]).float(), -1)
+        tr = TeacherReuse(model, exit_loop) if (args.exit_target == "reuse" and exit_loop is not None) else None
+        try:
+            with torch.no_grad(), torch.autocast(device.type, dtype=torch.bfloat16):
+                _, hs, _ = model.model(input_ids=ids, use_cache=False)
+                t_logp = F.log_softmax(model.lm_head(hs[-1]).float(), -1)
+        finally:
+            if tr is not None: tr.restore()
         cap.on = False
         # student pass through the swapped model, loss, backward (forwards stay patched for recomputation)
         decode = args.decode_mode and rng.random() >= args.p_lockstep

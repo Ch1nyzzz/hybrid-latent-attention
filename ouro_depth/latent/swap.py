@@ -132,6 +132,45 @@ def final_registers(model, student: LatentStudent, ids: Tensor, exit_loop: int |
     return regs
 
 
+class TeacherReuse:
+    """Patch the frozen teacher so that at loops >= exit_loop every layer attends with the K/V computed at loop exit_loop-1
+    (queries still from the current loop): the 'reuse' definition of early exit, no per-loop reconstruction."""
+
+    def __init__(self, model, exit_loop: int):
+        self.model, self.exit_loop = model, exit_loop
+        self.layers = model.model.layers[: model.config.num_hidden_layers]
+        self.kv: list[tuple[Tensor, Tensor] | None] = [None] * len(self.layers)
+        self.originals = [l.self_attn.forward for l in self.layers]
+        for i, l in enumerate(self.layers):
+            l.self_attn.forward = self._make(i)
+
+    def restore(self):
+        for l, f in zip(self.layers, self.originals):
+            l.self_attn.forward = f
+
+    def _make(self, i: int):
+        attn = self.layers[i].self_attn
+        from .register import apply_rope
+
+        def forward(hidden_states, position_embeddings, attention_mask=None, current_ut: int = 0, **_):
+            cos, sin = position_embeddings
+            B, L, _ = hidden_states.shape
+            shp = (B, L, -1, attn.head_dim)
+            q = apply_rope(attn.q_proj(hidden_states).view(shp).transpose(1, 2), cos, sin)
+            if current_ut < self.exit_loop:
+                k = apply_rope(attn.k_proj(hidden_states).view(shp).transpose(1, 2), cos, sin)
+                v = attn.v_proj(hidden_states).view(shp).transpose(1, 2)
+                if current_ut == self.exit_loop - 1:
+                    self.kv[i] = (k, v)
+            else:
+                k, v = self.kv[i]
+            out = F.scaled_dot_product_attention(q, k, v, is_causal=True, scale=attn.scaling)
+            out = attn.o_proj(out.transpose(1, 2).reshape(B, L, -1))
+            return out, None
+
+        return forward
+
+
 @torch.no_grad()
 def trace_hidden(model, student: LatentStudent, ids: Tensor, layers: set[int] | None = None) -> list[float]:
     """Relative error ||h_swap - h_teacher|| / ||h_teacher|| of every decoder-layer output, in execution order
@@ -152,7 +191,7 @@ def trace_hidden(model, student: LatentStudent, ids: Tensor, layers: set[int] | 
 
 @torch.no_grad()
 def logit_kl(model, student: LatentStudent, ids: Tensor, exit_loops: list[int | None], layers: set[int] | None = None,
-             decode: bool = False, passes: int = 2) -> dict:
+             decode: bool = False, passes: int = 2, exit_target: str = "full") -> dict:
     """Teacher vs swapped final-loop logits on one batch. Returns per exit_loop: mean KL(teacher||swapped),
     top-1 agreement, teacher NLL and swapped NLL of the next token.
     decode=True evaluates the decode structure: history = final registers of a previous pass (``passes`` passes in total,
@@ -163,9 +202,16 @@ def logit_kl(model, student: LatentStudent, ids: Tensor, exit_loops: list[int | 
         _, hs, _ = model.model(input_ids=ids, use_cache=False)
         return model.lm_head(hs[-1])[:, :-1].float()
 
-    t_logp = F.log_softmax(final_logits(), -1)
+    t_logp_full = F.log_softmax(final_logits(), -1)
     res = {}
     for ex in exit_loops:
+        t_logp = t_logp_full
+        if exit_target == "reuse" and ex is not None:   # early exit defined as K/V reuse: the teacher itself reuses loop-ex K/V
+            tr = TeacherReuse(model, ex)
+            try:
+                t_logp = F.log_softmax(final_logits(), -1)
+            finally:
+                tr.restore()
         if decode:
             hist = final_registers(model, student, ids, ex)
             for _ in range(passes - 2):

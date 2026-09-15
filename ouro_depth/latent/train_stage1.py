@@ -33,6 +33,8 @@ def parse():
     p.add_argument("--finalize", action="store_true", help="exit transform: readers at depth != writer depth read Phi(c), lockstep reads raw c")
     p.add_argument("--rank1", type=int, default=0, help="dedicated loop-1 latent size (K and V each); loop-1 readers use it instead of the register")
     p.add_argument("--split-readers", action="store_true", help="separate reader maps for in-progress (lockstep/self) vs final (cached) registers")
+    p.add_argument("--exit-target", default="full", choices=["full", "reuse"],
+                   help="teacher target for history that exited at tau < t: 'full' = the teacher's loop-t K/V (predict), 'reuse' = its loop-tau K/V")
     p.add_argument("--init-blocks", type=int, default=8)
     p.add_argument("--micro-batch", type=int, default=4); p.add_argument("--accum", type=int, default=1)
     p.add_argument("--steps", type=int, default=0, help="0 = one pass over the training blocks")
@@ -45,11 +47,16 @@ def parse():
 
 
 def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer_depth: Tensor | None, tau_fixed: int | None,
-                 kl_w: float, out_w: float, backward: bool) -> dict[str, list[float]]:
-    """One layer, all reader loops. writer_depth: (T, B, L) long in [0, T) per reader loop and token, or None with tau_fixed."""
+                 kl_w: float, out_w: float, backward: bool, exit_target: str = "full") -> dict[str, list[float]]:
+    """One layer, all reader loops. writer_depth: (T, B, L) long in [0, T) per reader loop and token, or None with tau_fixed.
+    exit_target='reuse': a key whose writer depth tau is below the reader loop t is scored against the teacher's loop-tau K/V."""
     h_loops = teacher.h_in[l]
     T = len(h_loops)
     dev_type = h_loops[0].device.type
+    kv_all = None
+    if exit_target == "reuse":
+        with torch.no_grad():
+            kv_all = [teacher.qkv(l, h, cos, sin) for h in h_loops]          # per loop: (q_rope, k_rope, v, q)
     with torch.autocast(dev_type, dtype=torch.bfloat16):
         regs = student_layer.write(h_loops)                    # (T, B, L, rank+rank_v), raw (lockstep) registers
         fin = student_layer.finalize(regs)                     # registers as cached after exit
@@ -58,10 +65,22 @@ def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer
     for t in range(T):
         h = h_loops[t]
         with torch.no_grad():
-            q_rope, k, _, q = teacher.qkv(l, h, cos, sin)
+            q_rope, k, v, q = teacher.qkv(l, h, cos, sin) if kv_all is None else kv_all[t]
+            if kv_all is not None:  # reuse semantics: keys that exited at tau < t keep their loop-tau K/V
+                if writer_depth is None:
+                    src = min(tau_fixed, t)
+                    k, v = kv_all[src][1], kv_all[src][2]
+                else:
+                    src = torch.minimum(writer_depth[t], torch.full_like(writer_depth[t], t))          # (B, L)
+                    ks = torch.stack([kv_all[i][1] for i in range(T)]); vs = torch.stack([kv_all[i][2] for i in range(T)])  # (T,B,H,L,D)
+                    g = src[None, :, None, :, None].expand(1, *ks.shape[1:3], src.shape[1], ks.shape[-1])
+                    k = torch.gather(ks, 0, g)[0]; v = torch.gather(vs, 0, g)[0]
             t_logits = torch.matmul(q_rope, k.transpose(-1, -2)).float() * teacher.layers[l].self_attn.scaling + bias
             t_logp = F.log_softmax(t_logits, -1); del t_logits
-            t_out = teacher.out[l][t].float()
+            if kv_all is None:
+                t_out = teacher.out[l][t].float()
+            else:  # teacher output under the same (possibly reused) K/V
+                t_out = teacher.o_proj(l, torch.matmul(t_logp.exp().to(v.dtype), v).transpose(1, 2).reshape(h.shape[0], h.shape[1], -1)).float()
         raw_mask = None                                                          # (B, L) keys read as in-progress registers
         if c1 is not None and t == 0:
             c_read = c1; is_final = False                                        # loop-1 reader: same for every writer depth
@@ -107,7 +126,7 @@ def eval_matrix(student, teacher, blocks: np.ndarray, args, device, mb: int) -> 
         cos, sin = teacher.pos; bias = Teacher.causal_bias(ids.shape[1], device)
         for l in range(nL):
             for tau in range(T):
-                r = layer_losses(student.layers[l], teacher, l, cos, sin, bias, None, tau, 0, 0, backward=False)
+                r = layer_losses(student.layers[l], teacher, l, cos, sin, bias, None, tau, 0, 0, backward=False, exit_target=args.exit_target)
                 kl[l, tau] += torch.tensor(r["kl"], device=device); out[l, tau] += torch.tensor(r["out"], device=device)
         n += 1
     if dist.is_initialized():
@@ -182,7 +201,8 @@ def main():
             lock = torch.rand(T, B, L, generator=gen, device=device) < args.p_lockstep
             wd = torch.where(lock, torch.arange(T, device=device)[:, None, None].expand(T, B, L), torch.randint(0, T, (T, B, L), generator=gen, device=device))
             for l in range(cfg.num_hidden_layers):
-                r = layer_losses(student.layers[l], teacher, l, cos, sin, bias, wd, None, args.kl_weight / (args.accum * cfg.num_hidden_layers), args.out_weight / (args.accum * cfg.num_hidden_layers), backward=True)
+                r = layer_losses(student.layers[l], teacher, l, cos, sin, bias, wd, None, args.kl_weight / (args.accum * cfg.num_hidden_layers),
+                                 args.out_weight / (args.accum * cfg.num_hidden_layers), backward=True, exit_target=args.exit_target)
                 agg["kl"] += np.array(r["kl"]) / (args.accum * cfg.num_hidden_layers); agg["out"] += np.array(r["out"]) / (args.accum * cfg.num_hidden_layers)
         if world > 1:
             for p in params:
