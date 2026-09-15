@@ -160,5 +160,45 @@
   "tokens_per_seq": 512,
   "eager": false,
   "cudagraph": "FULL_DECODE_ONLY"
+ },
+ {
+  "model": "base exact KV",
+  "seqs": 32,
+  "prompt_tokens": 4096,
+  "tok_per_s": 244.1,
+  "tokens_per_seq": 512,
+  "eager": false,
+  "cudagraph": "FULL_DECODE_ONLY",
+  "ignore_eos": true
+ },
+ {
+  "model": "base exact KV",
+  "seqs": 128,
+  "prompt_tokens": 4096,
+  "tok_per_s": 267.8,
+  "tokens_per_seq": 512,
+  "eager": false,
+  "cudagraph": "FULL_DECODE_ONLY",
+  "ignore_eos": true
+ },
+ {
+  "model": "latent 256 FA (S6 stage1)",
+  "seqs": 32,
+  "prompt_tokens": 4096,
+  "tok_per_s": 452.6,
+  "tokens_per_seq": 512,
+  "eager": false,
+  "cudagraph": "FULL_DECODE_ONLY",
+  "ignore_eos": true
+ },
+ {
+  "model": "latent 256 FA (S6 stage1)",
+  "seqs": 128,
+  "prompt_tokens": 4096,
+  "tok_per_s": 561.0,
+  "tokens_per_seq": 512,
+  "eager": false,
+  "cudagraph": "FULL_DECODE_ONLY",
+  "ignore_eos": true
  }
 ]
