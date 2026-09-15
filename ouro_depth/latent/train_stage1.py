@@ -169,6 +169,7 @@ def main():
                 agg["kl"] += np.array(r["kl"]) / (args.accum * cfg.num_hidden_layers); agg["out"] += np.array(r["out"]) / (args.accum * cfg.num_hidden_layers)
         if world > 1:
             for p in params:
+                if p.grad is None: p.grad = torch.zeros_like(p)  # e.g. finalize MLP on batches without early exit
                 dist.all_reduce(p.grad); p.grad /= world
         gn = torch.nn.utils.clip_grad_norm_(params, 1.0).item()
         opt.step(); step += 1
