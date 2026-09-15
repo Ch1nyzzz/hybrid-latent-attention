@@ -51,7 +51,7 @@ for rank, r1 in ((512, 256), (256, 128)):
 PY
     for combo in TRITON_ATTN:512 TRITON_ATTN:256 FLASH_ATTN:256; do be=${combo%%:*}; rank=${combo##*:}
       echo "=== backend=$be rank=$rank"
-      timeout 1500 python ouro_depth/vllm_latent/compare.py --model "$MODEL" --student "$OUT/rand_student_$rank.pt" --out "$OUT/kt_${be}_$rank" --backend $be --throughput 4 --tp-tokens 32 --max-model-len 2048 2>&1 | grep -E "^\{\"TP|COMPARE_DONE|Error|error|Traceback|not supported|head|Using .* attention backend" | grep -vE "FutureWarning|LIBARCHIVE" | tail -8
+      timeout 1500 python ouro_depth/vllm_latent/compare.py --model "$MODEL" --student "$OUT/rand_student_$rank.pt" --out "$OUT/kt_${be}_$rank" --backend $be --throughput 4 --tp-tokens 32 --max-model-len 2048 2>&1 | grep -E "^\{\"TP|COMPARE_DONE|Error|error|Traceback|not supported|head|Using .* attention backend" | grep -vE "FutureWarning|LIBARCHIVE" | tail -8 || true
       echo "=== end backend=$be rank=$rank"
     done ;;
   *) echo "unknown MODE $MODE"; exit 2 ;;
