@@ -200,5 +200,23 @@
   "eager": false,
   "cudagraph": "FULL_DECODE_ONLY",
   "ignore_eos": true
+ },
+ {
+  "model": "base exact KV, FlexAttention",
+  "seqs": 32,
+  "prompt_tokens": 4096,
+  "tok_per_s": 24.8,
+  "tokens_per_seq": 512,
+  "eager": true,
+  "ignore_eos": true
+ },
+ {
+  "model": "latent 512 Flex (S5 stage3b)",
+  "seqs": 32,
+  "prompt_tokens": 4096,
+  "tok_per_s": 17.0,
+  "tokens_per_seq": 512,
+  "eager": true,
+  "ignore_eos": true
  }
 ]
