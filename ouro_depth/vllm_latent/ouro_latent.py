@@ -29,6 +29,7 @@ from vllm.model_executor.layers.linear import MergedColumnParallelLinear, QKVPar
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead, VocabParallelEmbedding
+from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.sequence import IntermediateTensors
 from vllm.v1.attention.backend import AttentionType
 
@@ -253,6 +254,24 @@ class OuroModel(nn.Module):
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
 
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        stacked = [("qkv_proj", "q_proj", "q"), ("qkv_proj", "k_proj", "k"), ("qkv_proj", "v_proj", "v"),
+                   ("gate_up_proj", "gate_proj", 0), ("gate_up_proj", "up_proj", 1)]
+        params = dict(self.named_parameters()); loaded: set[str] = set()
+        for name, w in weights:
+            if "rotary_emb.inv_freq" in name:
+                continue
+            for pname, wname, shard in stacked:
+                if wname in name:
+                    name = name.replace(wname, pname)
+                    if name in params:
+                        params[name].weight_loader(params[name], w, shard); loaded.add(name)
+                    break
+            else:
+                if name in params:
+                    getattr(params[name], "weight_loader", default_weight_loader)(params[name], w); loaded.add(name)
+        return loaded
+
     def forward(self, input_ids, positions, intermediate_tensors=None, inputs_embeds=None):
         hidden_states = inputs_embeds if inputs_embeds is not None else self.embed_input_ids(input_ids)
         for current_ut in range(self.total_ut_steps):
@@ -288,7 +307,7 @@ class OuroForCausalLM(nn.Module, SupportsLoRA):
         return self.logits_processor(self.lm_head, hidden_states)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        student_keys = ("cand", "gate", "finalize_mlp", "cand1", "q_absorb", "out_absorb", "rope_lat", "rope_l1")
+        student_keys = ("cand", "gate", "finalize_mlp", "cand1", "q_absorb", "out_absorb", "rope_lat", "rope_l1", "early_exit_gate")
         loader = AutoWeightsLoader(self, skip_prefixes=(["lm_head."] if self.config.tie_word_embeddings else None))
         loaded = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
         n = self.model.load_latent_student()
