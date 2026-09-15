@@ -52,7 +52,7 @@ def main():
                           "mean_abs_first_logprob_diff": sum(abs(x["vllm_first_logprob"] - x["hf_first_logprob_same_token"]) for x in rows if x["vllm_first_logprob"] is not None and x["hf_first_logprob_same_token"] is not None) / max(1, len(rows))}
         print(json.dumps({"CMP_SUMMARY": res["summary"]}), flush=True)
     if args.throughput:
-        sp = SamplingParams(temperature=1.0, top_p=0.7, max_tokens=args.tp_tokens, seed=0)
+        sp = SamplingParams(temperature=1.0, top_p=0.7, max_tokens=args.tp_tokens, seed=0, ignore_eos=True)   # fixed-length generation for throughput
         base_prompt = "Please write a long, detailed explanation of why the sky is blue, step by step."
         if args.tp_prompt_tokens:
             filler = tok.encode("The quick brown fox jumps over the lazy dog. ") * (args.tp_prompt_tokens // 8 + 1)
