@@ -46,7 +46,8 @@ class LatentDecoder:
                 _, hs, _ = self.model.model(input_ids=ids, use_cache=False)
         finally:
             sw.restore()
-        regs = [sw.student.layers[i].finalize(sw.regs[i]) for i in range(len(self.layers))]
+        with torch.autocast(ids.device.type, dtype=torch.bfloat16):
+            regs = [sw.student.layers[i].finalize(sw.regs[i]) for i in range(len(self.layers))]
         return regs, self.model.lm_head(hs[-1][:, -1]).float()
 
     @torch.no_grad()
@@ -105,8 +106,9 @@ class LatentDecoder:
                 with torch.autocast(dev.type, dtype=torch.bfloat16):
                     _, hs, _ = self.model.model(input_ids=next_tok[:, None], position_ids=lens[:, None], use_cache=False)
                     logits = self.model.lm_head(hs[-1][:, -1]).float()
-                for i in range(len(self.layers)):
-                    hist[i][torch.arange(B, device=dev), lens] = sl_all[i].finalize(cur[i])[:, 0].to(hist[i].dtype)
+                with torch.autocast(dev.type, dtype=torch.bfloat16):
+                    for i in range(len(self.layers)):
+                        hist[i][torch.arange(B, device=dev), lens] = sl_all[i].finalize(cur[i])[:, 0].to(hist[i].dtype)
                 lens = lens + 1
                 next_tok = logits.argmax(-1)
                 for b in range(B):
