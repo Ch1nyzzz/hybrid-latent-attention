@@ -4,7 +4,7 @@
 set -euo pipefail
 MODEL=/trisol/input/model; OUT=${TRISOL_OUTPUT_DIR:-/trisol/output}; WORK=/work/loop_scale
 mkdir -p "$WORK" "$OUT"; tar xzf "$BUNDLE" -C "$WORK"; cd "$WORK"; export PYTHONPATH="$WORK"
-STUDENT=${STUDENT:-$(find /trisol/input/models -name 'student-*.pt' 2>/dev/null | sort -V | tail -1)}
+STUDENT=${STUDENT:-$( (find /trisol/input/models -name 'student-*.pt' 2>/dev/null || true) | sort -V | tail -1)}
 echo "student: $STUDENT"
 V=/opt/conda/lib/python3.11/site-packages/vllm/model_executor/models
 cp "$V/ouro.py" "$OUT/ouro.py.orig" 2>/dev/null || true

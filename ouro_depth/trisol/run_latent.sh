@@ -27,7 +27,7 @@ case "${MODE:?MODE required}" in
   probe)
     python -m ouro_depth.latent.probe_linear --model-path "$MODEL" --data-dir "$CORPUS" --output "$OUT/probe" ${PROBE_ARGS:-} ;;
   stage2)  # end-to-end distillation from a stage-1 checkpoint (auxiliary model input) or fresh
-    STUDENT=${STUDENT:-$(find /trisol/input/models -name 'student-*.pt' 2>/dev/null | sort -V | tail -1)}
+    STUDENT=${STUDENT:-$( (find /trisol/input/models -name 'student-*.pt' 2>/dev/null || true) | sort -V | tail -1)}
     echo "student: ${STUDENT:-fresh}"
     torchrun --standalone --nproc_per_node="$NGPU" -m ouro_depth.latent.train_stage2 --model-path "$MODEL" --data-dir "$CORPUS" --output "$OUT/stage2" ${STUDENT:+--student "$STUDENT"} ${STAGE2_ARGS:-} ;;
   matheval)  # greedy MATH500 with the latent cache (auxiliary model input holds student-*.pt) or the base model (BASE=1)
@@ -49,7 +49,7 @@ print(json.dumps({"MATHEVAL_MERGED": {"n_samples": n, "n_problems": len(byp), "a
 PY
     ;;
   hfref)  # HF-side reference streams for the vLLM comparison (student from the auxiliary model input)
-    STUDENT=${STUDENT:-$(find /trisol/input/models -name 'student-*.pt' 2>/dev/null | sort -V | tail -1)}
+    STUDENT=${STUDENT:-$( (find /trisol/input/models -name 'student-*.pt' 2>/dev/null || true) | sort -V | tail -1)}
     python -m ouro_depth.latent.hf_reference --model-path "$MODEL" --student "$STUDENT" --data ouro_depth/matheval/data/math500.jsonl --output "$OUT/hfref" ${HFREF_ARGS:-} ;;
   vllmprobe)
     python ouro_depth/trisol/vllm_probe.py ;;
