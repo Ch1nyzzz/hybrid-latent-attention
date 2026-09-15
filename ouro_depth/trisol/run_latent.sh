@@ -35,7 +35,7 @@ case "${MODE:?MODE required}" in
     echo "student: ${STUDENT:-BASE}"; mkdir -p "$OUT/matheval"
     for i in $(seq 0 $((NGPU-1))); do
       CUDA_VISIBLE_DEVICES=$i python -m ouro_depth.latent.generate --model-path "$MODEL" --data ouro_depth/matheval/data/math500.jsonl \
-        --output "$OUT/matheval" --shard $i --nshards "$NGPU" ${STUDENT:+--student "$STUDENT"} ${MATHEVAL_ARGS:-} > "$OUT/matheval/shard$i.log" 2>&1 &
+        --output "$OUT/matheval" --shard $((i + ${SHARD_OFFSET:-0})) --nshards "${NSHARDS:-$NGPU}" ${STUDENT:+--student "$STUDENT"} ${MATHEVAL_ARGS:-} > "$OUT/matheval/shard$i.log" 2>&1 &
     done; wait
     for i in $(seq 0 $((NGPU-1))); do grep -q "^GEN_DONE" "$OUT/matheval/shard$i.log" || { echo "SHARD_FAILED $i"; tail -25 "$OUT/matheval/shard$i.log"; }; done
     grep -h "GEN_SUMMARY" "$OUT/matheval"/shard*.log || true
