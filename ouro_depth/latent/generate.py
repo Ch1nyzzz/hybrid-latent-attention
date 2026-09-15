@@ -53,8 +53,19 @@ class LatentDecoder:
                 regs = [torch.cat([r, c1.to(r.dtype)], -1) for r, c1 in zip(regs, sw.c1)]
         return regs, self.model.lm_head(hs[-1][:, -1]).float()
 
+    @staticmethod
+    def pick(logits: Tensor, temperature: float, top_p: float) -> Tensor:
+        """Greedy if temperature == 0, else nucleus sampling (vLLM-style top_p on the temperature-scaled distribution)."""
+        if temperature <= 0:
+            return logits.argmax(-1)
+        probs = F.softmax(logits / temperature, -1)
+        sp, si = probs.sort(-1, descending=True)
+        keep = (sp.cumsum(-1) - sp) < top_p                    # keep tokens whose cumulative mass before them is < top_p
+        sp = sp * keep
+        return si.gather(-1, torch.multinomial(sp / sp.sum(-1, keepdim=True), 1)).squeeze(-1)
+
     @torch.no_grad()
-    def generate(self, prompts: list[Tensor], max_new: int, stop_ids: set[int]) -> list[list[int]]:
+    def generate(self, prompts: list[Tensor], max_new: int, stop_ids: set[int], temperature: float = 0.0, top_p: float = 1.0) -> list[list[int]]:
         B = len(prompts); dev = prompts[0].device
         hist = [torch.zeros(B, self.max_len, self.state, device=dev, dtype=torch.bfloat16) for _ in self.layers]
         lens = torch.tensor([p.shape[1] for p in prompts], device=dev)
@@ -63,7 +74,7 @@ class LatentDecoder:
             regs, logits = self.prefill(p)
             for i in range(len(self.layers)):
                 hist[i][b, : p.shape[1]] = regs[i][0].to(hist[i].dtype)
-            next_tok[b] = logits.argmax(-1)
+            next_tok[b] = self.pick(logits, temperature, top_p)
         out = [[int(next_tok[b])] for b in range(B)]
         done = torch.tensor([int(next_tok[b]) in stop_ids for b in range(B)], device=dev)
         cur: list[Tensor | None] = [None] * len(self.layers)
@@ -120,7 +131,7 @@ class LatentDecoder:
                         if sl_all[i].rank1: row = torch.cat([row, cur1[i][:, 0].to(row.dtype)], -1)
                         hist[i][torch.arange(B, device=dev), lens] = row.to(hist[i].dtype)
                 lens = lens + 1
-                next_tok = logits.argmax(-1)
+                next_tok = self.pick(logits, temperature, top_p)
                 for b in range(B):
                     if not done[b]:
                         out[b].append(int(next_tok[b]))
@@ -150,6 +161,8 @@ def main():
     p.add_argument("--model-path", required=True); p.add_argument("--data", required=True); p.add_argument("--output", required=True)
     p.add_argument("--student", default="", help="latent student checkpoint; empty = base model")
     p.add_argument("--loops", type=int, default=4); p.add_argument("--max-new", type=int, default=3072); p.add_argument("--batch", type=int, default=16)
+    p.add_argument("--n", type=int, default=1, help="samples per problem (avg@n / pass@n)"); p.add_argument("--temperature", type=float, default=0.0); p.add_argument("--top-p", type=float, default=1.0)
+    p.add_argument("--seed", type=int, default=0)
     p.add_argument("--shard", type=int, default=0); p.add_argument("--nshards", type=int, default=1); p.add_argument("--limit", type=int, default=0)
     args = p.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -165,30 +178,34 @@ def main():
     dec = LatentDecoder(model, student, max_len=4096 + args.max_new) if student is not None else None
     out_dir = Path(args.output); out_dir.mkdir(parents=True, exist_ok=True)
     fout = open(out_dir / f"shard{args.shard}.jsonl", "w")
-    t0 = time.time(); n_ok = 0; n_tok = 0; n_trunc = 0
-    for s in range(0, len(rows), args.batch):
-        batch = rows[s: s + args.batch]
-        texts = [tok.apply_chat_template([{"role": "user", "content": r["problem"] + INSTR}], tokenize=False, add_generation_prompt=True) for r in batch]
+    torch.manual_seed(args.seed + args.shard)
+    samples = [(r, k) for r in rows for k in range(args.n)]           # each problem n times
+    t0 = time.time(); n_ok = 0; n_tok = 0; n_trunc = 0; per_problem: dict[str, list[bool]] = {}
+    for s in range(0, len(samples), args.batch):
+        batch = samples[s: s + args.batch]
+        texts = [tok.apply_chat_template([{"role": "user", "content": r["problem"] + INSTR}], tokenize=False, add_generation_prompt=True) for r, _ in batch]
         enc = [tok(t, return_tensors="pt", add_special_tokens=False).input_ids.to(device) for t in texts]
         if dec is not None:
-            gens = dec.generate(enc, args.max_new, stop_ids)
+            gens = dec.generate(enc, args.max_new, stop_ids, args.temperature, args.top_p)
         else:  # base model: one prompt at a time with the model's own per-loop cache (known-good HF generate path)
             from ..vendor.modeling_ouro import UniversalTransformerCache
             gens = []
             for ids in enc:
                 cache = UniversalTransformerCache(model.config.num_hidden_layers * model.config.total_ut_steps)
+                sample_kw = dict(do_sample=True, temperature=args.temperature, top_p=args.top_p) if args.temperature > 0 else dict(do_sample=False)
                 with torch.no_grad():
-                    g = model.generate(input_ids=ids, do_sample=False, max_new_tokens=args.max_new, past_key_values=cache, use_cache=True,
+                    g = model.generate(input_ids=ids, max_new_tokens=args.max_new, past_key_values=cache, use_cache=True, **sample_kw,
                                        pad_token_id=tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id, eos_token_id=list(stop_ids))
                 gens.append(g[0, ids.shape[1]:].tolist())
-        for r, gg in zip(batch, gens):
+        for (r, k), gg in zip(batch, gens):
             text = tok.decode(gg, skip_special_tokens=True)
             ok = grade(text, r["answer"]); trunc = not any(x in stop_ids for x in gg[-2:]) and len(gg) >= args.max_new - 1
-            n_ok += ok; n_tok += len(gg); n_trunc += trunc
-            fout.write(json.dumps({"id": r["id"], "gold": r["answer"], "correct": ok, "tokens": len(gg), "truncated": trunc, "text": text}) + "\n"); fout.flush()
-        print(json.dumps({"GEN_PROGRESS": {"done": s + len(batch), "of": len(rows), "acc": round(n_ok / (s + len(batch)), 4), "elapsed": round(time.time() - t0)}}), flush=True)
-    summ = {"mode": "latent" if student is not None else "base", "shard": args.shard, "n": len(rows), "acc": n_ok / max(1, len(rows)), "mean_tokens": n_tok / max(1, len(rows)),
-            "trunc_rate": n_trunc / max(1, len(rows)), "seconds": round(time.time() - t0)}
+            n_ok += ok; n_tok += len(gg); n_trunc += trunc; per_problem.setdefault(r["id"], []).append(ok)
+            fout.write(json.dumps({"id": r["id"], "sample": k, "gold": r["answer"], "correct": ok, "tokens": len(gg), "truncated": trunc, "text": text}) + "\n"); fout.flush()
+        print(json.dumps({"GEN_PROGRESS": {"done": s + len(batch), "of": len(samples), "acc": round(n_ok / (s + len(batch)), 4), "elapsed": round(time.time() - t0)}}), flush=True)
+    N = max(1, len(samples))
+    summ = {"mode": "latent" if student is not None else "base", "shard": args.shard, "n_problems": len(rows), "n_samples": args.n, "temperature": args.temperature, "top_p": args.top_p,
+            "avg_at_n": n_ok / N, "pass_at_n": sum(any(v) for v in per_problem.values()) / max(1, len(per_problem)), "mean_tokens": n_tok / N, "trunc_rate": n_trunc / N, "seconds": round(time.time() - t0)}
     json.dump(summ, open(out_dir / f"summary{args.shard}.json", "w"))
     print(json.dumps({"GEN_SUMMARY": summ}), flush=True); print("GEN_DONE", flush=True)
 

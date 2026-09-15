@@ -42,8 +42,10 @@ case "${MODE:?MODE required}" in
     python - "$OUT/matheval" <<'PY'
 import json, glob, sys
 d = sys.argv[1]; rows = [json.loads(l) for f in sorted(glob.glob(f"{d}/shard*.jsonl")) for l in open(f)]
-n = len(rows); print(json.dumps({"MATHEVAL_MERGED": {"n": n, "acc": sum(r["correct"] for r in rows) / max(1, n), "mean_tokens": sum(r["tokens"] for r in rows) / max(1, n),
-      "trunc_rate": sum(r["truncated"] for r in rows) / max(1, n)}}), flush=True)
+n = len(rows); byp = {}
+for r in rows: byp.setdefault(r["id"], []).append(r["correct"])
+print(json.dumps({"MATHEVAL_MERGED": {"n_samples": n, "n_problems": len(byp), "avg_at_n": sum(r["correct"] for r in rows) / max(1, n), "pass_at_n": sum(any(v) for v in byp.values()) / max(1, len(byp)),
+      "mean_tokens": sum(r["tokens"] for r in rows) / max(1, n), "trunc_rate": sum(r["truncated"] for r in rows) / max(1, n)}}), flush=True)
 PY
     ;;
   logit)  # student checkpoint from an auxiliary model input (--model NAME:CODE -> /trisol/input/models/model-0)
