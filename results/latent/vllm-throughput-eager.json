@@ -1,0 +1,30 @@
+[
+ {
+  "model": "base exact KV",
+  "seqs": 32,
+  "tok_per_s": 643.2,
+  "tokens_per_seq": 512,
+  "eager": true
+ },
+ {
+  "model": "base exact KV",
+  "seqs": 128,
+  "tok_per_s": 2505.7,
+  "tokens_per_seq": 512,
+  "eager": true
+ },
+ {
+  "model": "latent 512 Flex",
+  "seqs": 32,
+  "tok_per_s": 151.0,
+  "tokens_per_seq": 512,
+  "eager": true
+ },
+ {
+  "model": "latent 512 Flex",
+  "seqs": 128,
+  "tok_per_s": 528.8,
+  "tokens_per_seq": 512,
+  "eager": true
+ }
+]
