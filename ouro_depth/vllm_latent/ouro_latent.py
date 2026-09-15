@@ -199,6 +199,8 @@ class OuroLatentAttention(nn.Module):
     def _write_cache(attn, k: torch.Tensor, v: torch.Tensor, md) -> tuple[torch.Tensor, torch.Tensor]:
         """Write (T, r) keys/values into the layer's paged cache (Triton layout: blocks, kv_heads, block_size, 2r)."""
         kv_cache = attn.kv_cache[getattr(get_forward_context(), "virtual_engine", 0)]
+        if kv_cache.numel() == 0:            # profiling / dummy run before the cache is allocated
+            return None, None
         key_cache, value_cache = kv_cache.transpose(1, 2).split(k.shape[-1], dim=-1)
         triton_reshape_and_cache_flash(k[:, None], v[:, None], key_cache, value_cache, md.slot_mapping[: k.shape[0]], attn.impl.kv_cache_dtype, attn._k_scale, attn._v_scale)
         return key_cache, value_cache
@@ -206,6 +208,8 @@ class OuroLatentAttention(nn.Module):
     def _manual_attention(self, attn, qc: torch.Tensor, k: torch.Tensor, v: torch.Tensor, st: dict) -> torch.Tensor:
         """Prefill-step attention in torch over the paged cache: causal within each request, full history for decode requests."""
         md = st["md"]; key_cache, value_cache = self._write_cache(attn, k, v, md)
+        if key_cache is None:
+            return torch.zeros_like(qc)
         bs = key_cache.shape[1]; r = k.shape[-1]; out = torch.zeros_like(qc); qsl, sl = st["qsl"], st["sl"]
         for i in range(len(sl)):
             s, e, L = qsl[i], qsl[i + 1], sl[i]

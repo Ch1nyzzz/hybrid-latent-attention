@@ -145,6 +145,16 @@ class EvaluationHarnessTests(unittest.TestCase):
                     compare.main()
             self.assertEqual(error.exception.code, 2)
 
+    def test_empty_reference_is_rejected_even_with_throughput(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ref = Path(tmp) / "ref.json"
+            ref.write_text('{"student_cfg": {"rank": 512}, "prompts": []}')
+            argv = ["compare", "--model", "unused", "--out", "unused", "--ref", str(ref), "--throughput", "8"]
+            with patch.object(sys, "argv", argv):
+                with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                    compare.main()
+            self.assertEqual(error.exception.code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

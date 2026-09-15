@@ -2,7 +2,7 @@
 greedy token streams, and a throughput probe. Runs inside the vLLM image (transformers v5, no vendored HF model)."""
 from __future__ import annotations
 
-import argparse, json, os, time
+import argparse, json, time
 from pathlib import Path
 
 import torch
@@ -35,11 +35,15 @@ def main():
     p.add_argument("--tp-warmup", type=int, default=1, help="untimed generate calls of up to 8 tokens before the throughput measurement")
     p.add_argument("--compile-config", default="", help="JSON for vLLM compilation_config; when given, enforce_eager is off (CUDA graphs / torch.compile)")
     args = p.parse_args()
-    if args.tp_tokens < 1 or args.tp_warmup < 0 or args.throughput < 0:
-        p.error("tp-tokens must be positive; throughput and tp-warmup must be nonnegative")
+    if args.tp_tokens < 1 or min(args.tp_warmup, args.throughput, args.tp_prompt_tokens) < 0:
+        p.error("tp-tokens must be positive; throughput, tp-warmup and tp-prompt-tokens must be nonnegative")
     ref = json.load(open(args.ref)) if args.ref else None
     if not ref and not args.throughput:
         p.error("provide a nonempty reference or request throughput")
+    if ref is not None and not ref.get("prompts"):
+        p.error("reference must contain at least one prompt")
+    if ref and args.base and ref.get("student_cfg"):
+        p.error("a latent-student HF reference cannot validate the base model")
     if ref and not args.base:
         # mmap reads the checkpoint metadata without eagerly copying all weights.
         cfg = torch.load(args.student, map_location="cpu", mmap=True, weights_only=True)["cfg"]
@@ -58,6 +62,8 @@ def main():
         sp = SamplingParams(temperature=0.0, max_tokens=args.max_new, logprobs=5)
         prompts = [{"prompt_token_ids": r["prompt_ids"]} for r in ref["prompts"]]
         outs = llm.generate(prompts, sp)
+        if len(outs) != len(prompts):
+            raise RuntimeError("vLLM returned an incomplete comparison batch")
         rows = []
         for r, o in zip(ref["prompts"], outs):
             g = list(o.outputs[0].token_ids)
