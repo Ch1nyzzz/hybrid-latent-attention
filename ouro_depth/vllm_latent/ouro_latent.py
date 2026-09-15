@@ -50,14 +50,12 @@ class LatentRope(nn.Module):
         n_freq = head_dim // 2
         inv_freq = 1.0 / (theta ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim))  # (n_freq,)
         idx = torch.arange(d // 2) % n_freq
-        pos = torch.arange(max_position, dtype=torch.float32)
-        ang = pos[:, None] * inv_freq[idx][None, :]                                             # (max_pos, d/2)
-        self.register_buffer("cos", torch.cat([ang.cos(), ang.cos()], -1), persistent=False)   # (max_pos, d)
-        self.register_buffer("sin", torch.cat([ang.sin(), ang.sin()], -1), persistent=False)
+        self.register_buffer("inv_freq_lat", inv_freq[idx], persistent=False)                    # (d/2,)
 
     def forward(self, positions: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-        """x: (T, ..., d) with positions (T,)."""
-        cos = self.cos[positions].to(x.dtype); sin = self.sin[positions].to(x.dtype)
+        """x: (T, ..., d) with positions (T,); tables computed on the fly (no max_position-sized buffers)."""
+        ang = positions.to(torch.float32)[:, None] * self.inv_freq_lat[None, :]                  # (T, d/2)
+        cos = torch.cat([ang.cos(), ang.cos()], -1).to(x.dtype); sin = torch.cat([ang.sin(), ang.sin()], -1).to(x.dtype)
         while cos.dim() < x.dim():
             cos = cos.unsqueeze(1); sin = sin.unsqueeze(1)
         return x * cos + rotate_half(x) * sin
