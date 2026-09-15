@@ -90,8 +90,9 @@ PY
     ;;
   dbg)  # synchronous CUDA launches so the failing kernel shows in the traceback; DBG_ARGS as for compare
     REF=$(find /trisol/input/models -name 'hf_reference.json' 2>/dev/null | head -1); echo "ref: ${REF:-none}"
-    CUDA_LAUNCH_BLOCKING=1 python ouro_depth/vllm_latent/compare.py --model "$MODEL" --student "$STUDENT" --out "$OUT/dbg" ${REF:+--ref "$REF"} ${DBG_ARGS:-} > "$OUT/dbg.log" 2>&1 || true
-    grep -vE "LIBARCHIVE|FutureWarning" "$OUT/dbg.log" | grep -E 'File "|Error|error|illegal|CMP|COMPARE_DONE' | grep -v "ERROR 09" | sed 's/.*site-packages\///' | tail -60 ;;
+    # engine in-process (no EngineCore subprocess) so the Python frame launching the failing kernel is in the traceback
+    VLLM_ENABLE_V1_MULTIPROCESSING=0 CUDA_LAUNCH_BLOCKING=1 python ouro_depth/vllm_latent/compare.py --model "$MODEL" --student "$STUDENT" --out "$OUT/dbg" ${REF:+--ref "$REF"} ${DBG_ARGS:-} > "$OUT/dbg.log" 2>&1 || true
+    grep -vE "LIBARCHIVE|FutureWarning" "$OUT/dbg.log" | grep -E 'File "|Error|error|illegal|CMP|COMPARE_DONE|^    [a-z_]+\(' | sed 's/.*site-packages\///' | tail -80 ;;
   *) echo "unknown MODE $MODE"; exit 2 ;;
 esac
 echo "VLLM_LATENT_DONE mode=$MODE"
