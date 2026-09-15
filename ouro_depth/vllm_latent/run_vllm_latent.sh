@@ -10,6 +10,18 @@ V=/opt/conda/lib/python3.11/site-packages/vllm/model_executor/models
 cp "$V/ouro.py" "$OUT/ouro.py.orig" 2>/dev/null || true
 case " ${TP_ARGS:-} ${MATHEVAL_ARGS:-} " in *" --base "*) BASE=1;; esac
 [ "${BASE:-0}" = 1 ] || cp ouro_depth/vllm_latent/ouro_latent.py "$V/ouro.py"
+# Triton unified attention at head 512 (A100): default prefill tile 32 + pipelining overflows shared memory -> illegal memory access.
+python - <<'PY'
+import re
+p = "/opt/conda/lib/python3.11/site-packages/vllm/v1/attention/ops/triton_unified_attention.py"; s = open(p).read()
+if "loop-scale patch" not in s:
+    a = "    if is_prefill:\n        return 32\n"; b = "    if is_prefill:\n        return 16 if head_size >= 512 else 32  # loop-scale patch\n"
+    c = "    launch_num_stages: int | None = None\n"; d = c + "    if head_size >= 512:  # loop-scale patch: keep the 512-dim tiles within A100 shared memory\n        launch_num_warps = 8\n        launch_num_stages = 1\n"
+    assert s.count(a) == 1 and s.count(c) == 1, (s.count(a), s.count(c))
+    open(p, "w").write(s.replace(a, b).replace(c, d)); print("TRITON_PATCHED")
+else:
+    print("TRITON_ALREADY_PATCHED")
+PY
 export VLLM_USE_FLASHINFER_SAMPLER=0
 python -c "import vllm, transformers, torch; print('vllm', vllm.__version__, 'transformers', transformers.__version__, 'torch', torch.__version__)"
 python - <<'PY'
