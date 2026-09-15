@@ -15,8 +15,14 @@ python - <<'PY'
 import traceback
 try:
     from vllm.model_executor.models.ouro import OuroForCausalLM
-    from vllm.model_executor.models.registry import ModelRegistry
-    print("IMPORT_OK", OuroForCausalLM, "text_gen:", ModelRegistry.is_text_generation_model(["OuroForCausalLM"]))
+    from vllm.model_executor.models import registry as R
+    print("IMPORT_OK", OuroForCausalLM)
+    info = R._ModelInfo.from_model_cls(OuroForCausalLM)
+    print("MODEL_INFO", {k: getattr(info, k) for k in dir(info) if not k.startswith("_") and not callable(getattr(info, k))})
+    import inspect
+    from vllm.model_executor.models import interfaces_base as IB
+    print("IS_TEXT_GEN_SRC", inspect.getsource(IB.is_text_generation_model)[:1200])
+    print("SUPPORTS_PROTO", [n for n in dir(IB) if "TextGeneration" in n])
 except Exception:
     traceback.print_exc(); print("IMPORT_FAILED")
 PY
