@@ -12,6 +12,7 @@ Requires enforce_eager=True (the register state is threaded through Python) and 
 """
 
 import math
+import os
 from collections.abc import Iterable
 from typing import Any
 
@@ -30,6 +31,7 @@ from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead, VocabParallelEmbedding
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
+from vllm.attention.ops.triton_reshape_and_cache_flash import triton_reshape_and_cache_flash
 from vllm.sequence import IntermediateTensors
 from vllm.v1.attention.backend import AttentionType
 
@@ -125,6 +127,10 @@ class OuroLatentAttention(nn.Module):
             self.attn_l1 = Attention(num_heads, self.rank1, self.scaling, num_kv_heads=1, cache_config=cache_config, quant_config=quant_config,
                                      attn_type=attn_type, prefix=f"{p1}.attn")
         self._reg: torch.Tensor | None = None
+        # Triton unified attention crashes in its 2D (prefill) kernel at head 512 on A100; decode (3D kernel) is fine.
+        # For prefill-containing steps the main cache is written and attended manually (torch), decode steps use the kernel.
+        env = os.environ.get("LATENT_MANUAL_PREFILL")
+        self.manual_prefill = (env == "1") if env in ("0", "1") else (self.rank >= 512 and type(self.attn_main.impl).__name__.startswith("Triton"))
         self.step: dict = {}   # per-step context set by OuroModel.forward: rope tables, decode mask (no per-call GPU syncs)
 
     def finalize(self, c: torch.Tensor) -> torch.Tensor:
@@ -170,7 +176,10 @@ class OuroLatentAttention(nn.Module):
         if isinstance(dm, torch.Tensor):
             qc = torch.where(dm[:, None, None], torch.einsum("thd,hdr->thr", q, self.q_absorb_d[current_ut]), qc)
         qc = LatentRope.apply(qc, cos, sin)
-        o = self.attn_main(qc.reshape(T, -1), k, v).view(T, self.num_heads, self.rank_v)
+        if st.get("manual"):
+            o = self._manual_attention(self.attn_main, qc, k, v, st)
+        else:
+            o = self.attn_main(qc.reshape(T, -1), k, v).view(T, self.num_heads, self.rank_v)
         o_out = torch.einsum("thr,hrd->thd", o, Bm)
         if isinstance(dm, torch.Tensor):
             o_out = torch.where(dm[:, None, None], torch.einsum("thr,hrd->thd", o, self.out_absorb_d[current_ut]), o_out)
@@ -181,7 +190,35 @@ class OuroLatentAttention(nn.Module):
         """Write the finalized register into the main cache without attending (loop-1-only path)."""
         c_store = self.finalize(c); cos, sin = self.step["main"]
         k = LatentRope.apply(c_store[:, : self.rank], cos, sin); v = c_store[:, self.rank:]
-        self.attn_main(torch.zeros(c.shape[0], self.num_heads * self.rank, device=c.device, dtype=c.dtype), k, v)
+        if self.step.get("manual"):
+            self._write_cache(self.attn_main, k, v, self.step["md"])
+        else:
+            self.attn_main(torch.zeros(c.shape[0], self.num_heads * self.rank, device=c.device, dtype=c.dtype), k, v)
+
+    @staticmethod
+    def _write_cache(attn, k: torch.Tensor, v: torch.Tensor, md) -> tuple[torch.Tensor, torch.Tensor]:
+        """Write (T, r) keys/values into the layer's paged cache (Triton layout: blocks, kv_heads, block_size, 2r)."""
+        kv_cache = attn.kv_cache[getattr(get_forward_context(), "virtual_engine", 0)]
+        key_cache, value_cache = kv_cache.transpose(1, 2).split(k.shape[-1], dim=-1)
+        triton_reshape_and_cache_flash(k[:, None], v[:, None], key_cache, value_cache, md.slot_mapping[: k.shape[0]], attn.impl.kv_cache_dtype, attn._k_scale, attn._v_scale)
+        return key_cache, value_cache
+
+    def _manual_attention(self, attn, qc: torch.Tensor, k: torch.Tensor, v: torch.Tensor, st: dict) -> torch.Tensor:
+        """Prefill-step attention in torch over the paged cache: causal within each request, full history for decode requests."""
+        md = st["md"]; key_cache, value_cache = self._write_cache(attn, k, v, md)
+        bs = key_cache.shape[1]; r = k.shape[-1]; out = torch.zeros_like(qc); qsl, sl = st["qsl"], st["sl"]
+        for i in range(len(sl)):
+            s, e, L = qsl[i], qsl[i + 1], sl[i]
+            if e <= s:
+                continue
+            rows = md.block_table[i, : (L + bs - 1) // bs]
+            K = key_cache[rows].reshape(-1, r)[:L]; V = value_cache[rows].reshape(-1, r)[:L]
+            q = qc[s:e].transpose(0, 1)                                                     # (H, ql, r)
+            att = torch.matmul(q.float(), K.float().T) * self.scaling                       # (H, ql, L)
+            ql = e - s; qi = torch.arange(ql, device=qc.device)[:, None]; kj = torch.arange(L, device=qc.device)[None, :]
+            att = att.masked_fill(kj > (L - ql) + qi, float("-inf"))
+            out[s:e] = torch.matmul(torch.softmax(att, -1).to(V.dtype), V).transpose(0, 1)
+        return out
 
 
 class OuroDecoderLayer(nn.Module):
@@ -271,11 +308,14 @@ class OuroModel(nn.Module):
         md = get_forward_context().attn_metadata
         if isinstance(md, dict):
             md = md.get(a0.attn_main.layer_name) or next(iter(md.values()), None)
+        st["manual"] = False
         if md is None:                       # profiling / dummy run: lockstep readers
             st["decode"] = False
         elif int(md.max_query_len) == 1:     # pure decode step (the common case): final-register readers, no mask
             st["decode"] = True
         else:                                # prefill or mixed: per-token mask built without a host sync
+            if a0.manual_prefill:            # Triton@512: this step's main-cache attention runs in torch (one host sync per prefill step)
+                st["manual"] = True; st["md"] = md; st["qsl"] = md.query_start_loc.tolist(); st["sl"] = md.seq_lens.tolist()
             qsl = md.query_start_loc[: md.num_reqs + 1] if hasattr(md, "num_reqs") else md.query_start_loc
             qlen = qsl[1:] - qsl[:-1]
             mask = torch.repeat_interleave(qlen == 1, qlen, output_size=int(md.num_actual_tokens))
