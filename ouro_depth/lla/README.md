@@ -15,6 +15,7 @@ path that stores only the latent and **reconstructs** K/V per loop, and the path
 | incremental decode with the three caches | `engine.py` | real per-token decode, prefill shared |
 | accuracy | `quality.py` | per-layer attention KL + end-to-end decode KL/NLL |
 | memory and speed | `bench.py` | bytes/token, peak, ms/token, capacity at a KV budget |
+| same workload, one saturated GPU | `saturate.py` | largest batch that fits, aggregate tok/s, hours per 1M tokens |
 
 `c_j = E (x_j - mu)` with `x_j = [k_{j,1}..k_{j,T} ; v_{j,1}..v_{j,T}]`, `E` the top-`r` eigenvectors of the
 trajectory covariance (per head by default, `--mode per_layer` for one joint codec per layer). Decode uses it two ways:
@@ -43,6 +44,7 @@ python -m ouro_depth.lla.prepare_tokens --model-path $OURO --blocks 32 --skip 20
 python -m ouro_depth.lla.fit     --model-path $OURO --tokens fit_tokens.npy --ranks 32,64,128,256,512 --output out/
 python -m ouro_depth.lla.quality --model-path $OURO --tokens dev_tokens.npy --codecs out/lla_r*.pt --output out/quality.json
 python -m ouro_depth.lla.bench   --model-path $OURO --codecs out/lla_r128.pt --contexts 1024,4096,16384 --output out/bench.json
+python -m ouro_depth.lla.saturate --model-path $OURO --codecs out/lla_r512.pt out/lla_r128.pt --contexts 4096,16384,65536 --output out/sat.json
 ```
 
 Tests (no weights needed): `python -m pytest ouro_depth/tests/test_lla.py`.

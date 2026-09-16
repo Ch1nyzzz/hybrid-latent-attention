@@ -100,6 +100,58 @@ batch 扫描（ctx=4K，单卡 80 GB）：
 口径提醒：这是 eager HF 实现，单步有约 76 ms 的框架地板（96 次 layer×loop 前向，实测 ctx=8 时 B=1..64 都是 ~77 ms），
 exact 在 B≤16/4K 内基本被这个地板盖住。显存、容量、流量比值是硬数字；绝对延迟要换成融合 kernel 的 serving 栈再测。
 
+## 4b. 打满单卡：同样的 token 总量，LLA 到底更快还是更慢
+
+上面的表是固定 batch 的单步延迟；真正要回答的是**每种方法各自把一张卡塞满之后，跑完同样多 token 的总时间**。
+`ouro_depth/lla/saturate.py` 对每个 (路径, rank, context) 做倍增+二分搜出最大 batch，再测该 batch 的单步时间，
+聚合吞吐 = batch / 单步时间。一张 H100 80GB，T=4：
+
+| ctx | 路径 | 最大 batch | ms/step | 聚合 tok/s | vs exact | 跑完 1M token |
+|---|---|---|---|---|---|---|
+| 4K | exact | 18 | 72 | **249** | 1.00× | 1.1 h |
+| 4K | absorb r512 | 40 | 645 | 62 | 0.25× | 4.5 h |
+| 4K | absorb r128 | 120 | 1246 | 96 | 0.39× | 2.9 h |
+| 4K | reconstruct r512 | 32 | 1960 | 16 | 0.07× | 17.0 h |
+| 4K | reconstruct r128 | 128 | 5093 | 25 | 0.10× | 11.1 h |
+| 16K | exact | 4 | 76 | **52.8** | 1.00× | 5.3 h |
+| 16K | absorb r512 | 10 | 648 | 15.4 | 0.29× | 18.0 h |
+| 16K | absorb r128 | 32 | 1328 | 24.1 | 0.46× | 11.5 h |
+| 16K | reconstruct r512 | 11 | 2714 | 4.1 | 0.08× | 68.5 h |
+| 16K | reconstruct r128 | 40 | 6399 | 6.3 | 0.12× | 44.4 h |
+| 64K | exact | 1 | 73 | **13.7** | 1.00× | 20.3 h |
+| 64K | absorb r512 | 2 | 553 | 3.6 | 0.26× | 76.9 h |
+| 64K | absorb r128 | 7 | 1213 | 5.8 | 0.42× | 48.1 h |
+| 64K | reconstruct r512 | 2 | 2025 | 1.0 | 0.07× | 281 h |
+| 64K | reconstruct r128 | 10 | 6618 | 1.5 | 0.11× | 184 h |
+
+**结论：多出来的并发换不回时间。** 同样的 token 总量，reconstruct 慢 8–14×，absorb 慢 2.2–4×。
+
+为什么并发变多反而没用：decode 打满后是带宽/算力 roofline，聚合吞吐 ≈ `BW / 每 token 每步的访存量`，
+**与 batch 无关**；batch 只决定"能不能填满卡"。每 token 每层每步的访存量（元素数，T=4、H=16、D=128、d_rope=64）：
+
+| 路径 | 每步访存 | vs exact | 每 token 存储 | vs exact |
+|---|---|---|---|---|
+| exact | `2·T·H·D` = 16,384 | 1.00× | 786 KB | 1.00× |
+| absorb r512 | `T·(2·H·r + H·d_rope)` = 69,632 | 4.25× | 442 KB | 0.56× |
+| absorb r128 | 20,480 | 1.25× | 147 KB | 0.19× |
+| absorb r64 | 12,288 | 0.75× | 98 KB | 0.13× |
+| absorb r32 | 8,192 | 0.50× | 74 KB | 0.09× |
+
+关键在于 **latent 每个 loop 都要被重读一遍，score 和 output 各读一次**，所以访存量是 `2·T·G·r` 而不是 `G·r`：
+压缩比是 `2T·D/r`，带宽比却只是 `r/D`。per-head 情况下 `r=128=D` 时带宽持平（加上 RoPE key 还多 25%），
+`r=512` 时反而是 exact 的 4.25×。实测吞吐比（0.25–0.46×）比 roofline 预测（0.24–0.8×）再差一档，
+是我们的 GEMV kernel 效率问题：exact 打到约 780 GB/s，absorb 只有约 390 GB/s。
+
+于是对 LLA 出现一个**双向夹逼**：
+- 能保住精度的 rank（r=512，2× 压缩，端到端 top-1 98.4%）访存是 exact 的 4.25×——省显存但一定更慢；
+- 能省访存的 rank（r≤64）端到端 top-1 已经跌到 8% 以下——快也没用。
+- reconstruct 更糟：每步 `O(N·H·D·r)` 的展开是纯增算力，长 context 下 8–14× 负收益，和压缩比无关。
+
+对本项目的直接启示：`RESEARCH_OBJECTIVE.md` §2 里"decode 吞吐"这一条不会因为 cache 变小自动成立。
+要让吞吐真的变好，必须同时满足 (a) `r` 显著小于 `D`，(b) 该 `r` 下端到端可用（=必须蒸馏），
+(c) 尽量让一个 token 的 T 个 loop 只扫一次 cache——但 loop 是串行的，这一条在现有 reader 结构下做不到，
+是架构层面需要解决的问题，而不是 kernel 层面的。
+
 ## 5. 对本项目的意义
 
 - LLA 的"轨迹低秩、cache 与 T 解耦"两条在 Ouro 上复现成立，且 T=8 不需要更大的 `r`——这支持我们把 `r` 固定、
@@ -109,4 +161,4 @@ exact 在 B≤16/4K 内基本被这个地板盖住。显存、容量、流量比
   而第 3 节说明训练无关的 PCA 在 `r < 256` 就已经崩——所以蒸馏不是可选项，是前提。
 - 逐层 KL 与端到端 top-1 的落差（0.076 → 62%）说明：只报逐层 KL 会系统性高估方法可用性，我们自己的评测要同时报端到端。
 
-数据文件：helios4 `~/lla_repro/lla_out/{fit,quality,bench,bench_batch2,bench_rank,bench_floor}.json`（T=8 在 `lla_out_T8/`）。
+数据文件：helios4 `~/lla_repro/lla_out/{fit,quality,bench,bench_batch2,bench_rank,bench_floor,sat_recon,sat_recon2,sat_absorb}.json`（T=8 在 `lla_out_T8/`）。
