@@ -152,6 +152,39 @@ exact 在 B≤16/4K 内基本被这个地板盖住。显存、容量、流量比
 (c) 尽量让一个 token 的 T 个 loop 只扫一次 cache——但 loop 是串行的，这一条在现有 reader 结构下做不到，
 是架构层面需要解决的问题，而不是 kernel 层面的。
 
+### 4c. "并发多几倍不就补回来了吗"——没有，因为 batch 不是免费的
+
+§4b 的 tok/s **已经是所有并发序列加总**（batch / 单步时间），不是单条序列的速度。拆开看 4K：
+
+| | 并发 | 单步 | 聚合 tok/s |
+|---|---|---|---|
+| exact | 18 | 72 ms | 249 |
+| absorb r128 | 120（6.7×） | 1246 ms（17×） | 96（0.39×） |
+
+并发确实多 6.7×，但单步慢了 17×。"加 batch 不加时间"只在 overhead-bound 阶段成立，实测（ctx=4K）：
+
+| batch | 1 | 8 | 16 | 32 | 64 |
+|---|---|---|---|---|---|
+| exact ms/step | 69.1 | 69.5 | 69.2 | OOM | OOM |
+| absorb r128 ms/step | 101.6 | 131.5 | 211.2 | 365.3 | 682.1 |
+
+exact 在它能放下的整个范围里都被 76 ms 的框架地板盖住，等于白拿并发；absorb 在 B≥8 就已经打到自己的 roofline，
+之后每加一倍并发就多一倍时间。roofline 下聚合吞吐 = `BW / 每 token 每步访存量`，与 batch 无关——
+absorb r128 每 token 每步读 983 KB，exact 读 786 KB，所以就算把 kernel 优化到 exact 的 780 GB/s，也只有 0.78×。
+
+### 4d. LLA 真正不可替代的地方：不是更快，是 exact 根本放不下
+
+| ctx | exact | absorb r512 | absorb r128 |
+|---|---|---|---|
+| 128K | **放不下**（需 96 GB） | 1 条，1.7 tok/s | 4 条，2.9 tok/s |
+| 256K | **放不下**（需 192 GB） | 放不下 | 2 条，1.4 tok/s |
+
+单卡 80 GB、T=4 时 exact 的 context 上限就在 64K（48 GB/条，且只能 1 条）。超过这个点，问题从"谁更快"变成
+"能不能跑"，这才是 LLA 主张成立的区间。另外大 batch 的单用户延迟很差（absorb B=120 时每 token 1.25 s），
+吞吐和交互延迟要分开谈。
+
+（>64K 的位置已超出 Ouro 训练的 `max_position_embeddings=65536`，这两行只作显存/速度测量，不含精度含义。）
+
 ## 5. 对本项目的意义
 
 - LLA 的"轨迹低秩、cache 与 T 解耦"两条在 Ouro 上复现成立，且 T=8 不需要更大的 `r`——这支持我们把 `r` 固定、
@@ -161,4 +194,4 @@ exact 在 B≤16/4K 内基本被这个地板盖住。显存、容量、流量比
   而第 3 节说明训练无关的 PCA 在 `r < 256` 就已经崩——所以蒸馏不是可选项，是前提。
 - 逐层 KL 与端到端 top-1 的落差（0.076 → 62%）说明：只报逐层 KL 会系统性高估方法可用性，我们自己的评测要同时报端到端。
 
-数据文件：helios4 `~/lla_repro/lla_out/{fit,quality,bench,bench_batch2,bench_rank,bench_floor,sat_recon,sat_recon2,sat_absorb}.json`（T=8 在 `lla_out_T8/`）。
+数据文件：helios4 `~/lla_repro/lla_out/{fit,quality,bench,bench_batch2,bench_rank,bench_floor,sat_recon,sat_recon2,sat_absorb,sat_long}.json`（T=8 在 `lla_out_T8/`）。
