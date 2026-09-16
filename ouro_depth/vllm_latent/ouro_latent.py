@@ -25,6 +25,7 @@ from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.attention import Attention
+from vllm.model_executor.layers.attention.attention import unified_kv_cache_update
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import ColumnParallelLinear, MergedColumnParallelLinear, RowParallelLinear
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
@@ -127,10 +128,12 @@ class OuroLatentAttention(nn.Module):
             self.attn_l1 = Attention(num_heads, self.rank1, self.scaling, num_kv_heads=1, cache_config=cache_config, quant_config=quant_config,
                                      attn_type=attn_type, prefix=f"{p1}.attn")
         self._reg: torch.Tensor | None = None
-        # Triton unified attention crashes in its 2D (prefill) kernel at head 512 on A100; decode (3D kernel) is fine.
-        # For prefill-containing steps the main cache is written and attended manually (torch), decode steps use the kernel.
+        # Experimental manual path is opt-in. Production uses the backend with
+        # metadata geometry patched from each kv_cache_spec.
         env = os.environ.get("LATENT_MANUAL_PREFILL")
-        self.manual_prefill = (env == "1") if env in ("0", "1") else (self.rank >= 512 and type(self.attn_main.impl).__name__.startswith("Triton"))
+        self.manual_prefill = env == "1"
+        # Keep the evaluated ordering until the candidate is explicitly adopted.
+        self.finalize_after_read = os.environ.get("LATENT_FINALIZE_AFTER_READ", "0") != "0"
         self.step: dict = {}   # per-step context set by OuroModel.forward: rope tables, decode mask (no per-call GPU syncs)
 
     def finalize(self, c: torch.Tensor) -> torch.Tensor:
@@ -161,8 +164,8 @@ class OuroLatentAttention(nn.Module):
                 self._store_final(c, positions)
             out, _ = self.o_proj(o)
             return out
-        # keys/values from the current register; the last loop stores the finalized register instead (decode reads finals)
-        c_store = self.finalize(c) if last else c
+        # HF reads raw current registers, then finalizes once for future tokens.
+        c_store = self.finalize(c) if last and not self.finalize_after_read else c
         cos, sin = st["main"]
         k = LatentRope.apply(c_store[:, : self.rank], cos, sin); v = c_store[:, self.rank:]
         # query side: decode tokens use the final-register reader set (A'/B'), prefill tokens the lockstep set (A/B);
@@ -180,6 +183,8 @@ class OuroLatentAttention(nn.Module):
             o = self._manual_attention(self.attn_main, qc, k, v, st)
         else:
             o = self.attn_main(qc.reshape(T, -1), k, v).view(T, self.num_heads, self.rank_v)
+        if last and self.finalize_after_read:
+            self._store_final(c, positions)
         o_out = torch.einsum("thr,hrd->thd", o, Bm)
         if isinstance(dm, torch.Tensor):
             o_out = torch.where(dm[:, None, None], torch.einsum("thr,hrd->thd", o, self.out_absorb_d[current_ut]), o_out)
@@ -187,13 +192,17 @@ class OuroLatentAttention(nn.Module):
         return out
 
     def _store_final(self, c: torch.Tensor, positions: torch.Tensor) -> None:
-        """Write the finalized register into the main cache without attending (loop-1-only path)."""
+        """Store terminal state after attention, using the backend's cache writer.
+
+        The native helper resolves this layer's cache geometry and slot mapping;
+        it performs no second attention and no guessed virtual-engine indexing.
+        This model path is currently qualified only in eager mode.
+        """
+        if get_forward_context().attn_metadata is None:
+            return  # Profiling has no persistent history to update.
         c_store = self.finalize(c); cos, sin = self.step["main"]
         k = LatentRope.apply(c_store[:, : self.rank], cos, sin); v = c_store[:, self.rank:]
-        if self.step.get("manual"):
-            self._write_cache(self.attn_main, k, v, self.step["md"])
-        else:
-            self.attn_main(torch.zeros(c.shape[0], self.num_heads * self.rank, device=c.device, dtype=c.dtype), k, v)
+        unified_kv_cache_update(k[:, None], v[:, None], self.attn_main.layer_name)
 
     @staticmethod
     def _write_cache(attn, k: torch.Tensor, v: torch.Tensor, md) -> tuple[torch.Tensor, torch.Tensor]:

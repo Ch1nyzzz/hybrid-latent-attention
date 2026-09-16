@@ -47,7 +47,7 @@ def parse():
 
 
 def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer_depth: Tensor | None, tau_fixed: int | None,
-                 kl_w: float, out_w: float, backward: bool, exit_target: str = "full") -> dict[str, list[float]]:
+                 kl_w: float, out_w: float, backward: bool, exit_target: str = "full", *, groups=None, tensor_metrics=False) -> dict:
     """One layer, all reader loops. writer_depth: (T, B, L) long in [0, T) per reader loop and token, or None with tau_fixed.
     exit_target='reuse': a key whose writer depth tau is below the reader loop t is scored against the teacher's loop-tau K/V."""
     h_loops = teacher.h_in[l]
@@ -62,6 +62,9 @@ def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer
         fin = student_layer.finalize(regs)                     # registers as cached after exit
         c1 = student_layer.write1(h_loops[0]) if student_layer.rank1 else None   # fixed loop-1 latent
     kls, outs = [], []
+    # Groups retain the legacy equal-length minibatch MSE normalization.
+    # Right padding is causally invisible to valid queries.
+    B = h_loops[0].shape[0]
     for t in range(T):
         h = h_loops[t]
         with torch.no_grad():
@@ -98,7 +101,9 @@ def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer
             else:
                 s_logits = student_layer.scores(t, q, h, c_read, cos, sin, final=is_final)
         s_logp = F.log_softmax(s_logits.float() + bias, -1); del s_logits
-        kl = (t_logp.exp() * (t_logp - s_logp)).sum(-1).mean()
+        per_query = (t_logp.exp() * (t_logp - s_logp)).sum(-1)
+        kl = (per_query.mean() if groups is None else
+              sum(per_query[a:b, :, :n].mean() * ((b-a)/B) for a, b, n in groups))
         with torch.autocast(dev_type, dtype=torch.bfloat16):
             probs = s_logp.exp()
             if raw_mask is not None and student_layer.split_readers:
@@ -107,10 +112,15 @@ def layer_losses(student_layer, teacher: Teacher, l: int, cos, sin, bias, writer
             else:
                 o_read = student_layer.read_out(t, probs, c_read, final=is_final)
             s_out = teacher.o_proj(l, o_read)
-        out = ((s_out.float() - t_out) ** 2).sum(-1).mean() / (t_out ** 2).sum(-1).mean().clamp_min(1e-6)
+        errors = (s_out.float() - t_out).square().sum(-1)
+        energy = t_out.square().sum(-1)
+        out = (errors.mean() / energy.mean().clamp_min(1e-6) if groups is None else
+               sum(errors[a:b, :n].mean() / energy[a:b, :n].mean().clamp_min(1e-6)
+                   * ((b-a)/B) for a, b, n in groups))
         if backward:
             (kl_w * kl + out_w * out).backward(retain_graph=t < T - 1)
-        kls.append(kl.item()); outs.append(out.item())
+        kls.append(kl.detach() if tensor_metrics else kl.item())
+        outs.append(out.detach() if tensor_metrics else out.item())
         del s_logp, t_logp
     return {"kl": kls, "out": outs}
 
