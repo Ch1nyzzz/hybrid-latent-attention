@@ -18,9 +18,18 @@ class Teacher:
         self.h_in: list[list[Tensor]] = [[] for _ in self.layers]
         self.out: list[list[Tensor]] = [[] for _ in self.layers]
         self.pos: tuple[Tensor, Tensor] | None = None
+        self.handles = []
         for i, layer in enumerate(self.layers):
-            layer.self_attn.register_forward_pre_hook(self._pre(i), with_kwargs=True)
-            layer.self_attn.register_forward_hook(self._post(i))
+            self.handles.append(layer.self_attn.register_forward_pre_hook(self._pre(i), with_kwargs=True))
+            self.handles.append(layer.self_attn.register_forward_hook(self._post(i)))
+
+    def remove_hooks(self) -> None:
+        """Release the capture hooks so the same model can be used for plain (or swapped) inference."""
+        for h in self.handles:
+            h.remove()
+        self.handles.clear()
+        for x in self.h_in + self.out:
+            x.clear()
 
     def _pre(self, i):
         def hook(_mod, _args, kwargs):
