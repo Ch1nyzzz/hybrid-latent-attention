@@ -1,0 +1,2368 @@
+{
+  "job_id": "2100507732791533568",
+  "configurations": [
+    {
+      "variant": "serial-m2-cp",
+      "exit_code": 0,
+      "rows": [
+        {
+          "event": "ready",
+          "variant": "serial-m2-cp",
+          "rank": 0,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-cp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": true,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:935bf37dbfa05a342ccba6a1d484496a8ab774a469a98c8d23db308ff1f7ba3d:4",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:4ce778d1899563557cf3db6d3257c139d8db28e5c30bb9a8460b73f8daff7555:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:580e3bfe968b4f714154e1fbee08d5c70ab136c43de78e147784c64513fff6d4:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:8dc713d0a9e07621a5d6263a34bd9455a47d73f3f4a321f9a91b83bc62d8e7d3:0",
+              "length": 1402
+            },
+            {
+              "id": "openr1:77376e18a41cb0558b66ad1382ae9b7318e2764547a59f07854ed1f199770619:1",
+              "length": 224
+            },
+            {
+              "id": "openr1:ce5fe5000c7eadfc335a5fad04def74ac28139ff16ddbe222adf67b427927f1f:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:a4ae24c5acd4ffa009604fccb1e68c6d0e6168ae414233a0a7b861aad14bad9b:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:12aad01ce4911667bdf8910d112a91557a931ff4ae46603a07c46e229284a4ab:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:ead74e5b8c540dabce790804c904c5da3a444d41386ab06a3489b89ea74d134a:0",
+              "length": 427
+            },
+            {
+              "id": "openr1:d3bcd6d4f51a48edbaa2e2dd2652cc314437f5976ba97b2c0b2f8225951a3506:5",
+              "length": 2048
+            },
+            {
+              "id": "openr1:191940699c7b4b5b76424b401065755aa7525f9b1a8540a91dbb08f0e00918b4:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:cb62b9241a8a948a43123293df22dc9a12c8539239447fe5a95a5889ee74e7e7:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:f121a78eaa513641c3e4f51bb8b50e832f4c603e7518be9238228d00e67850da:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:aecf7a2cb5d663e066c3f1b23572ce43853c52ad7b2a9772e6b55218ab912b24:0",
+              "length": 1009
+            },
+            {
+              "id": "openr1:2d60949f4827ae4eae7a6deead950f97444eccd65af45493f6ec03fecbad42dd:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:ec1b78d6d8eff09083084e0e858dca3cfcf48b28d99233cfe6410974902d6ed4:3",
+              "length": 2048
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 0,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 135.20333862304688,
+          "teacher_seconds": 3.4702545110485516,
+          "replay_seconds": 116.64868974505225,
+          "local_compute_seconds": 120.1608781569521,
+          "synchronization_seconds": 14.887933457037434,
+          "optimizer_seconds": 0.15452090196777135,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.722187042236328,
+          "peak_reserved_gib": 11.005859375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 0,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 133.03543090820312,
+          "teacher_seconds": 3.3807549627381377,
+          "replay_seconds": 114.39196485903813,
+          "local_compute_seconds": 117.80504418496275,
+          "synchronization_seconds": 15.11709215096198,
+          "optimizer_seconds": 0.1132931299507618,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.720995903015137,
+          "peak_reserved_gib": 11.005859375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-cp",
+          "rank": 1,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-cp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": true,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:cf7fb0b191fb119d69db5f73205acfd05f761763d5ee2de4c01268ef61930cc6:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:f95df51c5ca4e1f79ee3c74472fbda88a47fd2b46cf37ac1f31081d6dc757cc1:0",
+              "length": 538
+            },
+            {
+              "id": "openr1:dfa18f0d6f7f3161f9cd684af115a0d3c52f25cc13781ed840eedccc0439ca33:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:d64ef4ddf5d49401d8252e2447c342249265118648145d13036e3a0489f58003:7",
+              "length": 1123
+            },
+            {
+              "id": "fineweb:6dfbbe3258c13aa5315a1dcf63449659fde9bd47d443db902e074fc38bb31429:0",
+              "length": 922
+            },
+            {
+              "id": "openr1:48048c2acf7be8170f9d66a3d092f19a6470fc62ded33caf429fc0fc7eba8635:1",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:6bfd0cd855eeb56779ed7a05093c9a3167862ec156c90dfffa7f1958c94668cf:0",
+              "length": 1229
+            },
+            {
+              "id": "openr1:c0044ea0ee1cb88d59adfa6c06a1a1eecec3e5cf9d2d04d4ac880419e7558a81:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:d1be4399ebc596e0b1a15eea464971fd644b530b082a79da11e559320ffd259f:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:7ec3bf58b2b6a33dc9617134ae05c410387e3f819dee30d6c8e482170ebca0cc:0",
+              "length": 604
+            },
+            {
+              "id": "openr1:bdae7036bf09229af62d12257c69e4ca786a40096f9f0c9086604d982401c40a:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:a72b88816ff4fae8bdba019fbcbf138c74f3ae15eaf8d867de938d880a87e278:0",
+              "length": 639
+            },
+            {
+              "id": "openr1:ddd600cb00926af749bc9aecc1968700a76ea9313734d268557346b82a46f035:3",
+              "length": 2048
+            },
+            {
+              "id": "openr1:f10bca2fe6264aab0ccb4e087c063f23ed04e98d793aca640641cb60140537ac:1",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:4c004aa8283b6fe7620fe519c4d501dd195793587ca8726cb765dc142fa1a233:0",
+              "length": 789
+            },
+            {
+              "id": "openr1:f6032c0ba6163f768c9817c775dd1d0550b7aca2772ea1cb7062c947c5fe89e9:1",
+              "length": 261
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 1,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 135.20333862304688,
+          "teacher_seconds": 2.903568220906891,
+          "replay_seconds": 93.36094489687821,
+          "local_compute_seconds": 96.3126875179587,
+          "synchronization_seconds": 38.736316587019246,
+          "optimizer_seconds": 0.04547651298344135,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.722187042236328,
+          "peak_reserved_gib": 11.005859375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 1,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 133.03543090820312,
+          "teacher_seconds": 2.8169369000243023,
+          "replay_seconds": 92.59885120112449,
+          "local_compute_seconds": 95.45719302201178,
+          "synchronization_seconds": 37.46500514203217,
+          "optimizer_seconds": 0.021535859035793692,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.720995903015137,
+          "peak_reserved_gib": 11.005859375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-cp",
+          "rank": 2,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-cp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": true,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:2e0e8b10f77a7d5528a02feef5bbc6cd10ae66b6af46d1f5e2885b218d66bc7d:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:e27f44c1e1f9144b898b17e4197908ff2a3e7e8b4f608646024328fb5d06be1e:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:16a7fca88fecf4cec13a5751e7399e1a2ae8d1ae0a7e6ddbacb6b12ebf9d90e7:0",
+              "length": 369
+            },
+            {
+              "id": "openr1:1c0eb2512426cc5ef2b23c85617722fa2c863bcf92e9b05282eade36f59fd2ef:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:7b2974d89a79ff408f7232c0f2ead0cd5ae335ff7dc5c3bdd81f5e5e55a7d578:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:b0f4dc05d22044b4d44a9e70a4bf0c2a7d7adda82b1b700792701671cc5e4254:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:1732147f296a3b3b871211329a8e8f22371235bfcf0d6239cf509f147d17c3ef:3",
+              "length": 1495
+            },
+            {
+              "id": "fineweb:9a62435a9f7af9a7e9f53cb6f73a01e5731005fb664995bb73c50d84c78293ef:0",
+              "length": 92
+            },
+            {
+              "id": "openr1:9f46e953a5cb56507d50eae1d198ab5ae6cd84f457e3ec1ee2da9c9cd478a72c:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:81fe0dedfa477338515273551609802bff4e7e8267b56709e402302ce3f7f2d4:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:98a188ecba7ff91c4a5b954f0d5b15f89f0b3647e9fdfbf202447bd1913e0264:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:b2c10736550c6d4cb3bc22232bb7e308be03e943805ea5fffcd21f883554abf3:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:f1f24e1ee8255f5b24e4c382c3cb81d09544050ec7c56122a17e154d1f475eba:1",
+              "length": 546
+            },
+            {
+              "id": "openr1:4cab4364b9bd4d739d6f7e2e66d325fce031df049998f10817e2b8896e0c8ec2:4",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:be8aae3da8fa953abce777aa29c6db0949436fdee8080c3457ed24fda13a9668:0",
+              "length": 731
+            },
+            {
+              "id": "openr1:55c8cc9293b7a9a6b8389660afff7e4acf8064a369770a0f568d2b1cb3e755ab:1",
+              "length": 2022
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 2,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 135.20333862304688,
+          "teacher_seconds": 3.263318735989742,
+          "replay_seconds": 112.77354728791397,
+          "local_compute_seconds": 116.07784860901302,
+          "synchronization_seconds": 18.969069629034493,
+          "optimizer_seconds": 0.044779243995435536,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.72865343093872,
+          "peak_reserved_gib": 10.373046875,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 2,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 133.03543090820312,
+          "teacher_seconds": 3.218618243932724,
+          "replay_seconds": 110.8990197069943,
+          "local_compute_seconds": 114.15330520801945,
+          "synchronization_seconds": 18.768938041990623,
+          "optimizer_seconds": 0.02165724302176386,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.72886848449707,
+          "peak_reserved_gib": 10.599609375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-cp",
+          "rank": 3,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-cp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": true,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "fineweb:b1fdfd8d8610a134b44da515b1207f8cf1a6ebd115bf7f68320bf8e43a8afbb7:0",
+              "length": 519
+            },
+            {
+              "id": "openr1:0740230739347ce1149bbed57b3660d1bbdb6c528c28b16d53828818126f103c:1",
+              "length": 1965
+            },
+            {
+              "id": "fineweb:8c3bbec1e662f90b27141238b3a559e7d78b9266ec718f4bb835c40108271176:4",
+              "length": 2048
+            },
+            {
+              "id": "openr1:00d28bfcd0e0f5f719314c41dba1ca7cdac4a0ee92295d57bff51966bb925136:2",
+              "length": 2048
+            },
+            {
+              "id": "openr1:33b62807e00fa772cbf7265afab9043680d079a37ce7127fb878ad947b6ccd51:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:260eea0dc196dc5990b520c8824f5bdd1ba568be11999a58292303640cc3b56e:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:3129478e99cef581c21d0235b536b77d020e67d49f94f754ab5ceeece4e4724f:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:9e62fd5faa7f9c07d7067040e0c0a4884feafacdc108b197021606b797c0f1b4:0",
+              "length": 339
+            },
+            {
+              "id": "openr1:5f2bd4aad877f3d25410b85d96d627f9d6ca213dd84d8409d932cef5215b93f9:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:e9d3a103e7e0caf0470434767ab7507e0f1c0bf6b0672ad8965e8cce30ae07eb:3",
+              "length": 389
+            },
+            {
+              "id": "fineweb:1bffee79db28aeaffd401d43074d8789942accd84a9427b0f56bad456f073977:0",
+              "length": 937
+            },
+            {
+              "id": "openr1:0433710b27a3ffe0686baf244c9e300dc46c4824c7ce585e3fa4814b3fed3ab0:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:4d10f4598523c53e8136aaacb155cd78ca0af9bc2ddef55e8bfa0fed4f0d4aab:0",
+              "length": 1553
+            },
+            {
+              "id": "openr1:0d9d58fc1e28ff070131680878e807eb58819183f1a0d5532d6a2e0266c970db:1",
+              "length": 1165
+            },
+            {
+              "id": "openr1:0013ec2ab594aa321b98a28b630517028cb1025a9c3101e299a5a2d9a209bf32:0",
+              "length": 1713
+            },
+            {
+              "id": "fineweb:20cc2d83bd4d5bcfed2df7538772e28ea22a8e7255271936d52d4c547d40c7eb:0",
+              "length": 151
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 3,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 135.20333862304688,
+          "teacher_seconds": 3.1270026739803143,
+          "replay_seconds": 111.40935099404305,
+          "local_compute_seconds": 114.5814969590283,
+          "synchronization_seconds": 20.467999148007948,
+          "optimizer_seconds": 0.045558601967059076,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.722805500030518,
+          "peak_reserved_gib": 10.48046875,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 3,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 133.03543090820312,
+          "teacher_seconds": 2.9431649250909686,
+          "replay_seconds": 110.33313842990901,
+          "local_compute_seconds": 113.3261798779713,
+          "synchronization_seconds": 19.59609012794681,
+          "optimizer_seconds": 0.022212930023670197,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.721551418304443,
+          "peak_reserved_gib": 10.53515625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-cp",
+          "rank": 4,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-cp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": true,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "fineweb:f8128bde78c3bfb28af66e0da06b57ceeae3c6acfb9cd93496e7b09aef17f1d5:0",
+              "length": 978
+            },
+            {
+              "id": "openr1:2ce7a4558dc7faa61b474a3d4b8b04d6dbebcfcc48e381bd251321c49919ea04:3",
+              "length": 2048
+            },
+            {
+              "id": "openr1:ce6aacbef5d8c2948bb59eb3676915c7eeaf4382be51133df95bafec74bfb624:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:17d215157e7fd7f78aba3e1461d0a40c60f260a595bf4d9102862ce854814b9b:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:09a5f2aa427e7ead5107f6f7d4d98df9bf0b735e42e008fffa5f55650aa0daf2:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:da19f635b824965d2edbf87947accdce8689b3eb9598fb54cbc5c0c89522d263:0",
+              "length": 859
+            },
+            {
+              "id": "openr1:f5f991a02f976053c8f73a402c6b4677622609a6d04e967354cb58d7edbeb688:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:5b8f89fa5580900cd5ed085b899ea23ce78082b0bed089553987d1eb08ff512e:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:fcd8c2684ea636f13355929a3738f8d4232c3f908ac9f9eed05e41e4ebd6192f:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:d812f0781c870581cf700f1c09867ef5dad64c064cdc574b6e57ea5140a9e71c:4",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:88a3b9679cae4461eda543a25738b347efca29c1caa1827fda52806574935baa:0",
+              "length": 1258
+            },
+            {
+              "id": "openr1:58e878fb70fc31fe0ec58fa8949058841d5e11335b83b835fd73153ccae4030e:5",
+              "length": 2048
+            },
+            {
+              "id": "openr1:da519bef2f31f2077c8a56fa16db309fa11e85c55c5ba0ac38d3e5b9beea9702:3",
+              "length": 2026
+            },
+            {
+              "id": "fineweb:9d84ff06a58c18e5d38743543a845e71481ef0214d01dac622d986bb7fc74516:0",
+              "length": 322
+            },
+            {
+              "id": "openr1:38a92957443263e0b3fcc419db49dd96bfe31f3dbf2cb9788ceb3e9fb23c9225:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:dc65cdbae2c6aae1c4bf3bf9c44b73d39d7ab68bc40c2af9da4d6c392a98dfd8:0",
+              "length": 1610
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 4,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 135.20333862304688,
+          "teacher_seconds": 3.385246813064441,
+          "replay_seconds": 131.5354250970413,
+          "local_compute_seconds": 134.96862357098144,
+          "synchronization_seconds": 0.07678348600165918,
+          "optimizer_seconds": 0.04427761200349778,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.72183084487915,
+          "peak_reserved_gib": 10.44140625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 4,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 133.03543090820312,
+          "teacher_seconds": 3.3378131930949166,
+          "replay_seconds": 129.4927367369528,
+          "local_compute_seconds": 132.87881864997325,
+          "synchronization_seconds": 0.04325199802406132,
+          "optimizer_seconds": 0.02147091500228271,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.719887733459473,
+          "peak_reserved_gib": 10.56640625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-cp",
+          "rank": 5,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-cp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": true,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:9ec37229d9650013c444fb50ebd9b401b9915c10aa4ab36e0ff8fb8cfb924f99:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:64d600fde9ae8de4cd633008969d575a9ce5ec491e6d0f1497842afe783182ad:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:4c037482b2887a48e8e2993948cf0ae87df0df399fac0f85b43fde492f564a39:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:702a567d86bd46490c46332769b33f7826d2fbbf9f6a922c133c2e058d4239da:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:41dae52110fb79a00f66e903afff461c935b08059d0bcf8f7e3b3a12366ddcf9:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:78f230f5bfea0b1b3f1a288250914e7c2bb9323e65b6eb4939f2f1e3728d4275:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:147345f3563493e67ac89f237f3286390f6f05a855db0aebf4e45c14bd113a61:0",
+              "length": 1609
+            },
+            {
+              "id": "openr1:6f9512ec2c605787fb35a6d180945cfd2c9a2f0ca909583788e50ae4d6d5bedd:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:2e557b71f7ecfb9b097006978a6fde8efdc3567b6ad84ad50d723d073bbe967c:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:fc4d10d83d7c4c60e58f7a3106b7b146b8b3decaa384f4a3eb198be866f43b3d:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:0a00c03d6bbfee3da7d90d464bc16a0868c0f8b5efcbe45867872816b1926d3a:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:baefc686002780d37584cd973f53fa4cb0388e3cafaf8a32d7a863be81b7b1b7:0",
+              "length": 621
+            },
+            {
+              "id": "openr1:161d7d74014c698bd3fd885a16803416a7911ca105c6d99f364eb4bad6e7d92c:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:def12b4a7302e33ecb050b430d86f6acd208575148b40873fe8effe71cf8b19a:0",
+              "length": 251
+            },
+            {
+              "id": "openr1:91ad242a3f1d6de43907995136e2499fdc57cdba486313b6d120edd8fdb4a90b:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:529312a8eee2e0dbab55b3b72c74cb52298e5096c62e339004eb2e4651d91de8:0",
+              "length": 2048
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 5,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 135.20333862304688,
+          "teacher_seconds": 3.580222845892422,
+          "replay_seconds": 124.5556511800387,
+          "local_compute_seconds": 128.17886415601242,
+          "synchronization_seconds": 6.8650635879603215,
+          "optimizer_seconds": 0.04330576001666486,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.728691577911377,
+          "peak_reserved_gib": 10.396484375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 5,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 133.03543090820312,
+          "teacher_seconds": 3.525558043969795,
+          "replay_seconds": 123.74376228410983,
+          "local_compute_seconds": 127.3003236289951,
+          "synchronization_seconds": 5.6217577289789915,
+          "optimizer_seconds": 0.02200942498166114,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.727763175964355,
+          "peak_reserved_gib": 10.505859375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-cp",
+          "rank": 6,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-cp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": true,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:fb544ab2b9e0a0fd5da3a44e1894e0791837a6bb365519648ddfddfc8cacfe4a:2",
+              "length": 770
+            },
+            {
+              "id": "fineweb:4f70dd4719edbfeaacc4fe08e499bc5dc46d2993ba1ce69e6fb9d78ca9ab003c:0",
+              "length": 395
+            },
+            {
+              "id": "openr1:3cc5a34aa779908ff1bdd5b7f8d98a3499edefe28140c99d2a2eb622effc1371:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:30358a85c4c45268a130dbe8ad3c7f5a55fdb82edd1a2458c80ee73b1a3f31e6:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:be75c9fa8bf9e75bb1c4e44513a67d17f76d63e85fbbea8908f6c8727486a2d7:0",
+              "length": 969
+            },
+            {
+              "id": "openr1:39416ccd31a1d0e62360adb4a0fbcd3cca6512dbd35f450ff67a3a60e5726e5c:1",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:a9d3efaa040afcfe3d48e8009471cca7d1a52c5af271c3afc7e420d8ae418201:0",
+              "length": 557
+            },
+            {
+              "id": "openr1:b62a3aa633780793e9593651898a16a769344cf97583e139f42049d05a1e2ef6:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:d4e6bf341a6ef1d9b3aca75461c9c340905e58a18c216fe12e5587cf49fa179b:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:df5ee08ee416d726cf78edeb7a922ee77c5c3eee8eba1d49a8b9e7144b6ebbdf:0",
+              "length": 1543
+            },
+            {
+              "id": "openr1:70c66115e813869d81dded3fc0cdd4611f9d0db726315c89e1e6dc447dacf308:6",
+              "length": 810
+            },
+            {
+              "id": "fineweb:4cd43f0d7113e10d82913441716d6ec3468d4105f1c414a260d1ed2d17c6daa0:0",
+              "length": 1116
+            },
+            {
+              "id": "openr1:fafb1ac38580b337b9e8c6802650edee298ea3234005f7c78336ba2306c01865:2",
+              "length": 291
+            },
+            {
+              "id": "openr1:b437822aed564b42e7148c86cd88e0cf4ba4338a86c6b90e6e6b4cfac549607b:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:397301a5dfbc1665b44568ccbb44acf09c41ea17b7776fecb87ba0e24a6f3b71:0",
+              "length": 341
+            },
+            {
+              "id": "openr1:a10c4e2d22806f3dddeaad5300f4719adf577f9ae6e1104b7990be5ff2780e8b:0",
+              "length": 2048
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 6,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 135.20333862304688,
+          "teacher_seconds": 2.7371785669820383,
+          "replay_seconds": 100.69049148098566,
+          "local_compute_seconds": 103.46401899697958,
+          "synchronization_seconds": 31.581368851009756,
+          "optimizer_seconds": 0.043645343044772744,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.7227463722229,
+          "peak_reserved_gib": 10.458984375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 6,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 133.03543090820312,
+          "teacher_seconds": 2.7014125561108813,
+          "replay_seconds": 99.3542022369802,
+          "local_compute_seconds": 102.07932639302453,
+          "synchronization_seconds": 30.842981335998047,
+          "optimizer_seconds": 0.022087942983489484,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.721713542938232,
+          "peak_reserved_gib": 10.568359375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-cp",
+          "rank": 7,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-cp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": true,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:c6d61f0839f60fc41b4a4ed3adcfc54134f39cd472cf1027584e321e1429af4f:0",
+              "length": 2028
+            },
+            {
+              "id": "openr1:eaf1c7ecf23a5f281c29d675020f0c70eb5640181ed26d4dba5a9b7c63122914:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:87fa525533e774a1f6fb3cfc010cf4ad5659da1188bc6413c82a3381621c6451:2",
+              "length": 1442
+            },
+            {
+              "id": "openr1:2ee2d31eed9c110c0d7c85b62200173e5ec2f765aef6254a4d646a03739ccd55:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:225a103ef0b4e787db961959616b4a33ba788482dbfa220179e8a1a07f4acc89:2",
+              "length": 2048
+            },
+            {
+              "id": "openr1:ceda84d0da0978842d6f4111b07a8c1b631bd50443ffdfcf57df0c0cc4bfcb5e:2",
+              "length": 2048
+            },
+            {
+              "id": "openr1:3fb22cf0086c4577412737ae4c402c6fcd1ae1b6ad4375c94d8565841cddfad8:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:a93e5c6ac52bc2c7445295f47c170687aec75a7fc8d7b5eefec63c7cf24f553f:0",
+              "length": 456
+            },
+            {
+              "id": "openr1:3a0242b93799b62d6de4d2a7cfbfb2a0262fba408d46b3564f13b6372ad239ce:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:e2b6268fcb61e72da0b7957ae92908582c0ad5ad1cc52774c3295897a7365a69:0",
+              "length": 904
+            },
+            {
+              "id": "openr1:8cddcc523254aaf27641c987b50bf88bd3af567ada476235f2f4b8e174576e77:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:6f9d0cd4a8bf8e8f00914913feadeed801754bb8e42226fbe5d926dfb8384eb5:1",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:53214c09b1fcfdd1d1ac05a54e942a5dce38331d34e1a575154537c1eec84879:0",
+              "length": 766
+            },
+            {
+              "id": "openr1:a0dab74e42110eccc95028945de650a2d5da9f8028e00e6da2ae8b2ef28f7a54:4",
+              "length": 272
+            },
+            {
+              "id": "fineweb:50cd26b66f02a5b11b4af08b47a187e38030d9281e32c00ae470c46114eee3fb:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:fdbe3274cf72433addf0616ff01dcac517e641d31d84350f124527701c868783:0",
+              "length": 2048
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 7,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 135.20333862304688,
+          "teacher_seconds": 3.2767568309791386,
+          "replay_seconds": 126.0648522832198,
+          "local_compute_seconds": 129.3780724380049,
+          "synchronization_seconds": 5.666928318038117,
+          "optimizer_seconds": 0.04292241501389071,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.737658500671387,
+          "peak_reserved_gib": 10.767578125,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-cp",
+          "rank": 7,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 133.03543090820312,
+          "teacher_seconds": 3.2331324769183993,
+          "replay_seconds": 123.503844071005,
+          "local_compute_seconds": 126.77836835000198,
+          "synchronization_seconds": 6.143781290971674,
+          "optimizer_seconds": 0.021442594996187836,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 9.725717544555664,
+          "peak_reserved_gib": 10.767578125,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        }
+      ]
+    },
+    {
+      "variant": "serial-m2-nocp",
+      "exit_code": 0,
+      "rows": [
+        {
+          "event": "ready",
+          "variant": "serial-m2-nocp",
+          "rank": 0,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-nocp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": false,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:935bf37dbfa05a342ccba6a1d484496a8ab774a469a98c8d23db308ff1f7ba3d:4",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:4ce778d1899563557cf3db6d3257c139d8db28e5c30bb9a8460b73f8daff7555:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:580e3bfe968b4f714154e1fbee08d5c70ab136c43de78e147784c64513fff6d4:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:8dc713d0a9e07621a5d6263a34bd9455a47d73f3f4a321f9a91b83bc62d8e7d3:0",
+              "length": 1402
+            },
+            {
+              "id": "openr1:77376e18a41cb0558b66ad1382ae9b7318e2764547a59f07854ed1f199770619:1",
+              "length": 224
+            },
+            {
+              "id": "openr1:ce5fe5000c7eadfc335a5fad04def74ac28139ff16ddbe222adf67b427927f1f:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:a4ae24c5acd4ffa009604fccb1e68c6d0e6168ae414233a0a7b861aad14bad9b:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:12aad01ce4911667bdf8910d112a91557a931ff4ae46603a07c46e229284a4ab:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:ead74e5b8c540dabce790804c904c5da3a444d41386ab06a3489b89ea74d134a:0",
+              "length": 427
+            },
+            {
+              "id": "openr1:d3bcd6d4f51a48edbaa2e2dd2652cc314437f5976ba97b2c0b2f8225951a3506:5",
+              "length": 2048
+            },
+            {
+              "id": "openr1:191940699c7b4b5b76424b401065755aa7525f9b1a8540a91dbb08f0e00918b4:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:cb62b9241a8a948a43123293df22dc9a12c8539239447fe5a95a5889ee74e7e7:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:f121a78eaa513641c3e4f51bb8b50e832f4c603e7518be9238228d00e67850da:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:aecf7a2cb5d663e066c3f1b23572ce43853c52ad7b2a9772e6b55218ab912b24:0",
+              "length": 1009
+            },
+            {
+              "id": "openr1:2d60949f4827ae4eae7a6deead950f97444eccd65af45493f6ec03fecbad42dd:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:ec1b78d6d8eff09083084e0e858dca3cfcf48b28d99233cfe6410974902d6ed4:3",
+              "length": 2048
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 0,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 78.19954681396484,
+          "teacher_seconds": 3.4286500090383925,
+          "replay_seconds": 67.45096894499147,
+          "local_compute_seconds": 70.93453384999884,
+          "synchronization_seconds": 7.214197569002863,
+          "optimizer_seconds": 0.04362614202545956,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.28327989578247,
+          "peak_reserved_gib": 47.771484375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 0,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 76.09831237792969,
+          "teacher_seconds": 3.3874661010340787,
+          "replay_seconds": 64.89254661387531,
+          "local_compute_seconds": 68.30667336896295,
+          "synchronization_seconds": 7.769580333027989,
+          "optimizer_seconds": 0.02186825399985537,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.22834253311157,
+          "peak_reserved_gib": 47.771484375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-nocp",
+          "rank": 1,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-nocp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": false,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:cf7fb0b191fb119d69db5f73205acfd05f761763d5ee2de4c01268ef61930cc6:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:f95df51c5ca4e1f79ee3c74472fbda88a47fd2b46cf37ac1f31081d6dc757cc1:0",
+              "length": 538
+            },
+            {
+              "id": "openr1:dfa18f0d6f7f3161f9cd684af115a0d3c52f25cc13781ed840eedccc0439ca33:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:d64ef4ddf5d49401d8252e2447c342249265118648145d13036e3a0489f58003:7",
+              "length": 1123
+            },
+            {
+              "id": "fineweb:6dfbbe3258c13aa5315a1dcf63449659fde9bd47d443db902e074fc38bb31429:0",
+              "length": 922
+            },
+            {
+              "id": "openr1:48048c2acf7be8170f9d66a3d092f19a6470fc62ded33caf429fc0fc7eba8635:1",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:6bfd0cd855eeb56779ed7a05093c9a3167862ec156c90dfffa7f1958c94668cf:0",
+              "length": 1229
+            },
+            {
+              "id": "openr1:c0044ea0ee1cb88d59adfa6c06a1a1eecec3e5cf9d2d04d4ac880419e7558a81:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:d1be4399ebc596e0b1a15eea464971fd644b530b082a79da11e559320ffd259f:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:7ec3bf58b2b6a33dc9617134ae05c410387e3f819dee30d6c8e482170ebca0cc:0",
+              "length": 604
+            },
+            {
+              "id": "openr1:bdae7036bf09229af62d12257c69e4ca786a40096f9f0c9086604d982401c40a:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:a72b88816ff4fae8bdba019fbcbf138c74f3ae15eaf8d867de938d880a87e278:0",
+              "length": 639
+            },
+            {
+              "id": "openr1:ddd600cb00926af749bc9aecc1968700a76ea9313734d268557346b82a46f035:3",
+              "length": 2048
+            },
+            {
+              "id": "openr1:f10bca2fe6264aab0ccb4e087c063f23ed04e98d793aca640641cb60140537ac:1",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:4c004aa8283b6fe7620fe519c4d501dd195793587ca8726cb765dc142fa1a233:0",
+              "length": 789
+            },
+            {
+              "id": "openr1:f6032c0ba6163f768c9817c775dd1d0550b7aca2772ea1cb7062c947c5fe89e9:1",
+              "length": 261
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 1,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 78.19954681396484,
+          "teacher_seconds": 2.8615772800985724,
+          "replay_seconds": 57.770966855983716,
+          "local_compute_seconds": 60.69055097200908,
+          "synchronization_seconds": 17.46253537503071,
+          "optimizer_seconds": 0.046456067997496575,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.28327989578247,
+          "peak_reserved_gib": 47.890625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 1,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 76.09831237792969,
+          "teacher_seconds": 2.810252171999309,
+          "replay_seconds": 54.72552965517389,
+          "local_compute_seconds": 57.5798874309985,
+          "synchronization_seconds": 18.496374654001556,
+          "optimizer_seconds": 0.02189216500846669,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.22834253311157,
+          "peak_reserved_gib": 47.890625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-nocp",
+          "rank": 2,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-nocp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": false,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:2e0e8b10f77a7d5528a02feef5bbc6cd10ae66b6af46d1f5e2885b218d66bc7d:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:e27f44c1e1f9144b898b17e4197908ff2a3e7e8b4f608646024328fb5d06be1e:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:16a7fca88fecf4cec13a5751e7399e1a2ae8d1ae0a7e6ddbacb6b12ebf9d90e7:0",
+              "length": 369
+            },
+            {
+              "id": "openr1:1c0eb2512426cc5ef2b23c85617722fa2c863bcf92e9b05282eade36f59fd2ef:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:7b2974d89a79ff408f7232c0f2ead0cd5ae335ff7dc5c3bdd81f5e5e55a7d578:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:b0f4dc05d22044b4d44a9e70a4bf0c2a7d7adda82b1b700792701671cc5e4254:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:1732147f296a3b3b871211329a8e8f22371235bfcf0d6239cf509f147d17c3ef:3",
+              "length": 1495
+            },
+            {
+              "id": "fineweb:9a62435a9f7af9a7e9f53cb6f73a01e5731005fb664995bb73c50d84c78293ef:0",
+              "length": 92
+            },
+            {
+              "id": "openr1:9f46e953a5cb56507d50eae1d198ab5ae6cd84f457e3ec1ee2da9c9cd478a72c:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:81fe0dedfa477338515273551609802bff4e7e8267b56709e402302ce3f7f2d4:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:98a188ecba7ff91c4a5b954f0d5b15f89f0b3647e9fdfbf202447bd1913e0264:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:b2c10736550c6d4cb3bc22232bb7e308be03e943805ea5fffcd21f883554abf3:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:f1f24e1ee8255f5b24e4c382c3cb81d09544050ec7c56122a17e154d1f475eba:1",
+              "length": 546
+            },
+            {
+              "id": "openr1:4cab4364b9bd4d739d6f7e2e66d325fce031df049998f10817e2b8896e0c8ec2:4",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:be8aae3da8fa953abce777aa29c6db0949436fdee8080c3457ed24fda13a9668:0",
+              "length": 731
+            },
+            {
+              "id": "openr1:55c8cc9293b7a9a6b8389660afff7e4acf8064a369770a0f568d2b1cb3e755ab:1",
+              "length": 2022
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 2,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 78.19954681396484,
+          "teacher_seconds": 3.245329205004964,
+          "replay_seconds": 65.1099283528747,
+          "local_compute_seconds": 68.40265286597423,
+          "synchronization_seconds": 9.74944820604287,
+          "optimizer_seconds": 0.044971898023504764,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.26103115081787,
+          "peak_reserved_gib": 47.400390625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 2,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 76.09831237792969,
+          "teacher_seconds": 3.2069861029158346,
+          "replay_seconds": 63.32654864800861,
+          "local_compute_seconds": 66.55113336496288,
+          "synchronization_seconds": 9.525041854009032,
+          "optimizer_seconds": 0.02163473900873214,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.27395248413086,
+          "peak_reserved_gib": 47.400390625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-nocp",
+          "rank": 3,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-nocp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": false,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "fineweb:b1fdfd8d8610a134b44da515b1207f8cf1a6ebd115bf7f68320bf8e43a8afbb7:0",
+              "length": 519
+            },
+            {
+              "id": "openr1:0740230739347ce1149bbed57b3660d1bbdb6c528c28b16d53828818126f103c:1",
+              "length": 1965
+            },
+            {
+              "id": "fineweb:8c3bbec1e662f90b27141238b3a559e7d78b9266ec718f4bb835c40108271176:4",
+              "length": 2048
+            },
+            {
+              "id": "openr1:00d28bfcd0e0f5f719314c41dba1ca7cdac4a0ee92295d57bff51966bb925136:2",
+              "length": 2048
+            },
+            {
+              "id": "openr1:33b62807e00fa772cbf7265afab9043680d079a37ce7127fb878ad947b6ccd51:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:260eea0dc196dc5990b520c8824f5bdd1ba568be11999a58292303640cc3b56e:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:3129478e99cef581c21d0235b536b77d020e67d49f94f754ab5ceeece4e4724f:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:9e62fd5faa7f9c07d7067040e0c0a4884feafacdc108b197021606b797c0f1b4:0",
+              "length": 339
+            },
+            {
+              "id": "openr1:5f2bd4aad877f3d25410b85d96d627f9d6ca213dd84d8409d932cef5215b93f9:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:e9d3a103e7e0caf0470434767ab7507e0f1c0bf6b0672ad8965e8cce30ae07eb:3",
+              "length": 389
+            },
+            {
+              "id": "fineweb:1bffee79db28aeaffd401d43074d8789942accd84a9427b0f56bad456f073977:0",
+              "length": 937
+            },
+            {
+              "id": "openr1:0433710b27a3ffe0686baf244c9e300dc46c4824c7ce585e3fa4814b3fed3ab0:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:4d10f4598523c53e8136aaacb155cd78ca0af9bc2ddef55e8bfa0fed4f0d4aab:0",
+              "length": 1553
+            },
+            {
+              "id": "openr1:0d9d58fc1e28ff070131680878e807eb58819183f1a0d5532d6a2e0266c970db:1",
+              "length": 1165
+            },
+            {
+              "id": "openr1:0013ec2ab594aa321b98a28b630517028cb1025a9c3101e299a5a2d9a209bf32:0",
+              "length": 1713
+            },
+            {
+              "id": "fineweb:20cc2d83bd4d5bcfed2df7538772e28ea22a8e7255271936d52d4c547d40c7eb:0",
+              "length": 151
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 3,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 78.19954681396484,
+          "teacher_seconds": 2.9934735170099884,
+          "replay_seconds": 69.51413880003383,
+          "local_compute_seconds": 72.56990813603625,
+          "synchronization_seconds": 5.578597231011372,
+          "optimizer_seconds": 0.04434504697564989,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.23899555206299,
+          "peak_reserved_gib": 47.27734375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 3,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 76.09831237792969,
+          "teacher_seconds": 2.9573003259138204,
+          "replay_seconds": 67.0562515790225,
+          "local_compute_seconds": 70.04991455702111,
+          "synchronization_seconds": 6.026325247948989,
+          "optimizer_seconds": 0.022068101970944554,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.23657417297363,
+          "peak_reserved_gib": 47.27734375,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-nocp",
+          "rank": 4,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-nocp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": false,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "fineweb:f8128bde78c3bfb28af66e0da06b57ceeae3c6acfb9cd93496e7b09aef17f1d5:0",
+              "length": 978
+            },
+            {
+              "id": "openr1:2ce7a4558dc7faa61b474a3d4b8b04d6dbebcfcc48e381bd251321c49919ea04:3",
+              "length": 2048
+            },
+            {
+              "id": "openr1:ce6aacbef5d8c2948bb59eb3676915c7eeaf4382be51133df95bafec74bfb624:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:17d215157e7fd7f78aba3e1461d0a40c60f260a595bf4d9102862ce854814b9b:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:09a5f2aa427e7ead5107f6f7d4d98df9bf0b735e42e008fffa5f55650aa0daf2:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:da19f635b824965d2edbf87947accdce8689b3eb9598fb54cbc5c0c89522d263:0",
+              "length": 859
+            },
+            {
+              "id": "openr1:f5f991a02f976053c8f73a402c6b4677622609a6d04e967354cb58d7edbeb688:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:5b8f89fa5580900cd5ed085b899ea23ce78082b0bed089553987d1eb08ff512e:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:fcd8c2684ea636f13355929a3738f8d4232c3f908ac9f9eed05e41e4ebd6192f:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:d812f0781c870581cf700f1c09867ef5dad64c064cdc574b6e57ea5140a9e71c:4",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:88a3b9679cae4461eda543a25738b347efca29c1caa1827fda52806574935baa:0",
+              "length": 1258
+            },
+            {
+              "id": "openr1:58e878fb70fc31fe0ec58fa8949058841d5e11335b83b835fd73153ccae4030e:5",
+              "length": 2048
+            },
+            {
+              "id": "openr1:da519bef2f31f2077c8a56fa16db309fa11e85c55c5ba0ac38d3e5b9beea9702:3",
+              "length": 2026
+            },
+            {
+              "id": "fineweb:9d84ff06a58c18e5d38743543a845e71481ef0214d01dac622d986bb7fc74516:0",
+              "length": 322
+            },
+            {
+              "id": "openr1:38a92957443263e0b3fcc419db49dd96bfe31f3dbf2cb9788ceb3e9fb23c9225:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:dc65cdbae2c6aae1c4bf3bf9c44b73d39d7ab68bc40c2af9da4d6c392a98dfd8:0",
+              "length": 1610
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 4,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 78.19954681396484,
+          "teacher_seconds": 3.3501755649922416,
+          "replay_seconds": 74.66916413191939,
+          "local_compute_seconds": 78.06523114797892,
+          "synchronization_seconds": 0.08700331300497055,
+          "optimizer_seconds": 0.04508360201725736,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.25244188308716,
+          "peak_reserved_gib": 48.12890625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 4,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 76.09831237792969,
+          "teacher_seconds": 3.326349156908691,
+          "replay_seconds": 72.65950792894,
+          "local_compute_seconds": 76.02837942901533,
+          "synchronization_seconds": 0.04768007202073932,
+          "optimizer_seconds": 0.021509572979994118,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.22461795806885,
+          "peak_reserved_gib": 48.12890625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-nocp",
+          "rank": 5,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-nocp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": false,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:9ec37229d9650013c444fb50ebd9b401b9915c10aa4ab36e0ff8fb8cfb924f99:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:64d600fde9ae8de4cd633008969d575a9ce5ec491e6d0f1497842afe783182ad:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:4c037482b2887a48e8e2993948cf0ae87df0df399fac0f85b43fde492f564a39:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:702a567d86bd46490c46332769b33f7826d2fbbf9f6a922c133c2e058d4239da:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:41dae52110fb79a00f66e903afff461c935b08059d0bcf8f7e3b3a12366ddcf9:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:78f230f5bfea0b1b3f1a288250914e7c2bb9323e65b6eb4939f2f1e3728d4275:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:147345f3563493e67ac89f237f3286390f6f05a855db0aebf4e45c14bd113a61:0",
+              "length": 1609
+            },
+            {
+              "id": "openr1:6f9512ec2c605787fb35a6d180945cfd2c9a2f0ca909583788e50ae4d6d5bedd:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:2e557b71f7ecfb9b097006978a6fde8efdc3567b6ad84ad50d723d073bbe967c:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:fc4d10d83d7c4c60e58f7a3106b7b146b8b3decaa384f4a3eb198be866f43b3d:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:0a00c03d6bbfee3da7d90d464bc16a0868c0f8b5efcbe45867872816b1926d3a:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:baefc686002780d37584cd973f53fa4cb0388e3cafaf8a32d7a863be81b7b1b7:0",
+              "length": 621
+            },
+            {
+              "id": "openr1:161d7d74014c698bd3fd885a16803416a7911ca105c6d99f364eb4bad6e7d92c:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:def12b4a7302e33ecb050b430d86f6acd208575148b40873fe8effe71cf8b19a:0",
+              "length": 251
+            },
+            {
+              "id": "openr1:91ad242a3f1d6de43907995136e2499fdc57cdba486313b6d120edd8fdb4a90b:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:529312a8eee2e0dbab55b3b72c74cb52298e5096c62e339004eb2e4651d91de8:0",
+              "length": 2048
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 5,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 78.19954681396484,
+          "teacher_seconds": 3.5580316340201534,
+          "replay_seconds": 71.8214916959987,
+          "local_compute_seconds": 75.4282608969952,
+          "synchronization_seconds": 2.722563491028268,
+          "optimizer_seconds": 0.0441203800146468,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.26103115081787,
+          "peak_reserved_gib": 47.59765625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 5,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 76.09831237792969,
+          "teacher_seconds": 3.5285845320904627,
+          "replay_seconds": 69.19495093205478,
+          "local_compute_seconds": 72.74493134900695,
+          "synchronization_seconds": 3.3311539260321297,
+          "optimizer_seconds": 0.021703382954001427,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.27395248413086,
+          "peak_reserved_gib": 47.59765625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-nocp",
+          "rank": 6,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-nocp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": false,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:fb544ab2b9e0a0fd5da3a44e1894e0791837a6bb365519648ddfddfc8cacfe4a:2",
+              "length": 770
+            },
+            {
+              "id": "fineweb:4f70dd4719edbfeaacc4fe08e499bc5dc46d2993ba1ce69e6fb9d78ca9ab003c:0",
+              "length": 395
+            },
+            {
+              "id": "openr1:3cc5a34aa779908ff1bdd5b7f8d98a3499edefe28140c99d2a2eb622effc1371:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:30358a85c4c45268a130dbe8ad3c7f5a55fdb82edd1a2458c80ee73b1a3f31e6:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:be75c9fa8bf9e75bb1c4e44513a67d17f76d63e85fbbea8908f6c8727486a2d7:0",
+              "length": 969
+            },
+            {
+              "id": "openr1:39416ccd31a1d0e62360adb4a0fbcd3cca6512dbd35f450ff67a3a60e5726e5c:1",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:a9d3efaa040afcfe3d48e8009471cca7d1a52c5af271c3afc7e420d8ae418201:0",
+              "length": 557
+            },
+            {
+              "id": "openr1:b62a3aa633780793e9593651898a16a769344cf97583e139f42049d05a1e2ef6:1",
+              "length": 2048
+            },
+            {
+              "id": "openr1:d4e6bf341a6ef1d9b3aca75461c9c340905e58a18c216fe12e5587cf49fa179b:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:df5ee08ee416d726cf78edeb7a922ee77c5c3eee8eba1d49a8b9e7144b6ebbdf:0",
+              "length": 1543
+            },
+            {
+              "id": "openr1:70c66115e813869d81dded3fc0cdd4611f9d0db726315c89e1e6dc447dacf308:6",
+              "length": 810
+            },
+            {
+              "id": "fineweb:4cd43f0d7113e10d82913441716d6ec3468d4105f1c414a260d1ed2d17c6daa0:0",
+              "length": 1116
+            },
+            {
+              "id": "openr1:fafb1ac38580b337b9e8c6802650edee298ea3234005f7c78336ba2306c01865:2",
+              "length": 291
+            },
+            {
+              "id": "openr1:b437822aed564b42e7148c86cd88e0cf4ba4338a86c6b90e6e6b4cfac549607b:3",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:397301a5dfbc1665b44568ccbb44acf09c41ea17b7776fecb87ba0e24a6f3b71:0",
+              "length": 341
+            },
+            {
+              "id": "openr1:a10c4e2d22806f3dddeaad5300f4719adf577f9ae6e1104b7990be5ff2780e8b:0",
+              "length": 2048
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 6,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 78.19954681396484,
+          "teacher_seconds": 2.777987594017759,
+          "replay_seconds": 58.81617262895452,
+          "local_compute_seconds": 61.641347490018234,
+          "synchronization_seconds": 16.509953195985872,
+          "optimizer_seconds": 0.04616540402639657,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.253206729888916,
+          "peak_reserved_gib": 48.134765625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 6,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 76.09831237792969,
+          "teacher_seconds": 2.6901297410950065,
+          "replay_seconds": 56.55460812797537,
+          "local_compute_seconds": 59.282642343023326,
+          "synchronization_seconds": 16.79348919802578,
+          "optimizer_seconds": 0.021767030004411936,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.229158878326416,
+          "peak_reserved_gib": 48.134765625,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "ready",
+          "variant": "serial-m2-nocp",
+          "rank": 7,
+          "mode": "update",
+          "config": {
+            "mode": "update",
+            "variant": "serial-m2-nocp",
+            "model_path": "/trisol/input/model",
+            "student": "/trisol/input/models/model-0/student-600.pt",
+            "data_dir": "/work/expanded-corpus",
+            "output": "/trisol/output/checkpoint-validation",
+            "raw_dir": "",
+            "chunk": 256,
+            "length": 513,
+            "samples": 2,
+            "global_batch": 128,
+            "repeats": 2,
+            "sample_batch": 0,
+            "window_batch": 0,
+            "balanced": false,
+            "legacy_groups": true,
+            "seed": 20260915
+          },
+          "parameters": 352321536,
+          "sample_batch": 2,
+          "window_batch": 0,
+          "checkpoint": false,
+          "supervised_chunks": 1,
+          "global_supervised_positions": 202915,
+          "samples": [
+            {
+              "id": "openr1:c6d61f0839f60fc41b4a4ed3adcfc54134f39cd472cf1027584e321e1429af4f:0",
+              "length": 2028
+            },
+            {
+              "id": "openr1:eaf1c7ecf23a5f281c29d675020f0c70eb5640181ed26d4dba5a9b7c63122914:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:87fa525533e774a1f6fb3cfc010cf4ad5659da1188bc6413c82a3381621c6451:2",
+              "length": 1442
+            },
+            {
+              "id": "openr1:2ee2d31eed9c110c0d7c85b62200173e5ec2f765aef6254a4d646a03739ccd55:2",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:225a103ef0b4e787db961959616b4a33ba788482dbfa220179e8a1a07f4acc89:2",
+              "length": 2048
+            },
+            {
+              "id": "openr1:ceda84d0da0978842d6f4111b07a8c1b631bd50443ffdfcf57df0c0cc4bfcb5e:2",
+              "length": 2048
+            },
+            {
+              "id": "openr1:3fb22cf0086c4577412737ae4c402c6fcd1ae1b6ad4375c94d8565841cddfad8:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:a93e5c6ac52bc2c7445295f47c170687aec75a7fc8d7b5eefec63c7cf24f553f:0",
+              "length": 456
+            },
+            {
+              "id": "openr1:3a0242b93799b62d6de4d2a7cfbfb2a0262fba408d46b3564f13b6372ad239ce:0",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:e2b6268fcb61e72da0b7957ae92908582c0ad5ad1cc52774c3295897a7365a69:0",
+              "length": 904
+            },
+            {
+              "id": "openr1:8cddcc523254aaf27641c987b50bf88bd3af567ada476235f2f4b8e174576e77:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:6f9d0cd4a8bf8e8f00914913feadeed801754bb8e42226fbe5d926dfb8384eb5:1",
+              "length": 2048
+            },
+            {
+              "id": "fineweb:53214c09b1fcfdd1d1ac05a54e942a5dce38331d34e1a575154537c1eec84879:0",
+              "length": 766
+            },
+            {
+              "id": "openr1:a0dab74e42110eccc95028945de650a2d5da9f8028e00e6da2ae8b2ef28f7a54:4",
+              "length": 272
+            },
+            {
+              "id": "fineweb:50cd26b66f02a5b11b4af08b47a187e38030d9281e32c00ae470c46114eee3fb:0",
+              "length": 2048
+            },
+            {
+              "id": "openr1:fdbe3274cf72433addf0616ff01dcac517e641d31d84350f124527701c868783:0",
+              "length": 2048
+            }
+          ]
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 7,
+          "mode": "update",
+          "repeat": 0,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 78.19954681396484,
+          "teacher_seconds": 3.2873938579577953,
+          "replay_seconds": 72.1786455110996,
+          "local_compute_seconds": 75.53634307300672,
+          "synchronization_seconds": 2.6144511770107783,
+          "optimizer_seconds": 0.04588071198668331,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.26439809799194,
+          "peak_reserved_gib": 47.98046875,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        },
+        {
+          "event": "result",
+          "variant": "serial-m2-nocp",
+          "rank": 7,
+          "mode": "update",
+          "repeat": 1,
+          "objective": 0.013133666684382206,
+          "kl_sum": 2332.153135970235,
+          "aux_sum": 3328.647578826174,
+          "supervised_positions": 202915.0,
+          "chunk": 256,
+          "supervised_chunks": 1,
+          "seconds": 76.09831237792969,
+          "teacher_seconds": 3.245984895154834,
+          "replay_seconds": 70.64141091599595,
+          "local_compute_seconds": 73.93074712000089,
+          "synchronization_seconds": 2.1454095999943092,
+          "optimizer_seconds": 0.021587368042673916,
+          "grad_norm": 0.10064556449651718,
+          "peak_allocated_gib": 36.26421642303467,
+          "peak_reserved_gib": 47.98046875,
+          "timing_scope": "teacher+history+replay+backward+sync+optimizer; excludes load/warmup/raw-diagnostic-copy",
+          "teacher_and_history_included": true
+        }
+      ]
+    }
+  ],
+  "aggregate": {
+    "variants": {
+      "serial-m2-cp": {
+        "seconds": [
+          135.20333862304688,
+          133.03543090820312
+        ],
+        "mean_seconds": 134.119384765625,
+        "peak_allocated_gib": 9.737658500671387,
+        "peak_reserved_gib": 11.005859375,
+        "objective": 0.013133666684382206,
+        "grad_norm": 0.10064556449651718
+      },
+      "serial-m2-nocp": {
+        "seconds": [
+          78.19954681396484,
+          76.09831237792969
+        ],
+        "mean_seconds": 77.14892959594727,
+        "peak_allocated_gib": 36.28327989578247,
+        "peak_reserved_gib": 48.134765625,
+        "objective": 0.013133666684382206,
+        "grad_norm": 0.10064556449651718
+      }
+    },
+    "speedup": 1.7384477719658533,
+    "time_reduction_fraction": 0.4247742059750288,
+    "matching_sample_assignments": true,
+    "matching_reported_loss_and_norm": true,
+    "global_raw_gradients_compared": false
+  }
+}

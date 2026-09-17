@@ -150,9 +150,16 @@ def load_export(path, device='cpu'):
     return LatentStudent.from_checkpoint(payload,device),payload
 
 
-def example_groups(records, micro_batch):
+def example_groups(records, micro_batch, *, group_by='legacy'):
     """Equal length AND prompt boundaries keep chunk policy independent of batching."""
     from collections import defaultdict
+    if group_by == 'length':
+        ordered = sorted(records, key=lambda row: (len(row['input_ids']), row['record_id']))
+        for start in range(0, len(ordered), micro_batch):
+            yield ordered[start:start+micro_batch]
+        return
+    if group_by != 'legacy':
+        raise ValueError('Unknown example grouping policy')
     groups=defaultdict(list)
     for row in records:groups[(len(row['input_ids']),row.get('prompt_len',0))].append(row)
     for group in groups.values():

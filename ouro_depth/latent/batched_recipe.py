@@ -17,11 +17,12 @@ class ReplayBatch:
     denominators: dict
 
 
-def prepare_batch(examples, teacher, stage, teacher_batch_size=1):
-    """Teacher is evaluated on unpadded prefixes, then aligned to left pads.
+def prepare_batch(examples, teacher, stage, teacher_batch_size=1, *, padding_side='left'):
+    """Teacher targets retain per-request coordinates and energy denominators.
 
     This bounds teacher working activations independently of student batch.
-    Targets retain their original per-example mean-square normalization.
+    The existing left-padding policy remains the default. Experimental
+    Stage2 right padding preserves request-relative chunk boundaries.
     """
     if not examples:
         raise ValueError('Empty microbatch')
@@ -30,9 +31,11 @@ def prepare_batch(examples, teacher, stage, teacher_batch_size=1):
         raise ValueError('Expected ([1,L] IDs, nonempty prompt with continuation)')
     if stage not in (2, 3):
         raise ValueError("Replay supports stages 2 and 3")
+    if padding_side not in ('left', 'right') or (stage == 3 and padding_side != 'left'):
+        raise ValueError('Right padding is supported only for Stage2')
     prompts = [ids.shape[1] - 1 if stage == 2 else p for ids, p in examples]
     prompt = max(prompts)
-    offsets = [prompt - p for p in prompts]
+    offsets = [prompt - p if padding_side == 'left' else 0 for p in prompts]
     length = max(off + ids.shape[1] - 1 for off, (ids, _) in zip(offsets, examples))
     ids = examples[0][0].new_zeros((len(examples), length))
     valid = torch.zeros_like(ids, dtype=torch.bool)

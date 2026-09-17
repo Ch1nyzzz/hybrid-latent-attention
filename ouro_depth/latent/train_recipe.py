@@ -23,6 +23,7 @@ def parse(argv=None):
     p.add_argument('--resume',default='')
     p.add_argument('--steps',default='600,400')
     p.add_argument('--prefill-chunk-sizes',default='32,64,128,256')
+    p.add_argument('--eval-prefill-chunk-sizes',default='')
     for name,default in [('global-batch-size',128),('micro-batch-size',2),('teacher-batch-size',1),
                          ('prefill-horizon-tokens',256),('prefill-supervised-chunks',1),('tbptt',32),
                          ('prompt-chunk-size',256),('seed',20260915),('warmup-steps',25),
@@ -30,10 +31,13 @@ def parse(argv=None):
                          ('min-length',64),('stage3-parallel-windows',1)]:p.add_argument('--'+name,type=int,default=default)
     p.add_argument('--stage3-precompute-loop1',action='store_true')
     p.add_argument('--no-checkpoint',action='store_true')
+    p.add_argument('--stage2-batching',choices=('legacy','length'),default='legacy')
     p.add_argument('--smoke',action='store_true')
     args=p.parse_args(argv)
     args.steps=tuple(int(x) for x in args.steps.split(','))
     args.prefill_chunk_sizes=tuple(int(x) for x in args.prefill_chunk_sizes.split(','))
+    args.eval_prefill_chunk_sizes=tuple(int(x) for x in args.eval_prefill_chunk_sizes.split(',')) if args.eval_prefill_chunk_sizes else ()
+    if args.eval_prefill_chunk_sizes and min(args.eval_prefill_chunk_sizes)<1:p.error('Evaluation chunk sizes must be positive')
     if len(args.steps)!=2 or min(args.steps)<1 or not args.prefill_chunk_sizes or min(args.prefill_chunk_sizes)<1:
         p.error('Expected two positive stage lengths and positive chunk sizes')
     if args.stage3_precompute_loop1:p.error('S6 trains loop one; precomputation is forbidden')
@@ -86,6 +90,9 @@ def main(argv=None):
     output,data=Path(args.output_dir),Path(args.data_dir)
     emit,log=json_logger(output,rank)
     metadata={k:v for k,v in vars(args).items() if k not in ('resume','stage1_student','stop_after','smoke','output_dir','data_dir')}
+    # Keep old default checkpoint metadata compatible; opt-in policy is recorded.
+    if args.stage2_batching == 'legacy':metadata.pop('stage2_batching')
+    if not args.eval_prefill_chunk_sizes:metadata.pop('eval_prefill_chunk_sizes')
     metadata.update(world=world,stages=(2,3),sampling='s6-source-epochs-v1',
                     data_manifest_sha256=hashlib.sha256((data/'manifest.json').read_bytes()).hexdigest())
     source=Path(args.resume) if args.resume else Path(args.stage1_student)
@@ -109,7 +116,8 @@ def main(argv=None):
     def validate(step):
         from .evaluate_recipe import evaluate
         with amp(device):
-            prefill=evaluate_prefill(model,student,targets_fn,validation,tuple(sorted(set((1,*args.prefill_chunk_sizes)))),device)
+            sizes=args.eval_prefill_chunk_sizes or args.prefill_chunk_sizes
+            prefill=evaluate_prefill(model,student,targets_fn,validation,tuple(sorted(set((1,*sizes)))),device)
             examples=[(torch.tensor(r['input_ids'],device=device)[None],r['prompt_len']) for r in validation]
             decode=evaluate(model,student,targets_fn,examples,prompt_chunk_size=args.prompt_chunk_size)
         keys=sorted(decode)
@@ -131,10 +139,12 @@ def main(argv=None):
         optimizer.zero_grad(set_to_none=True);set_learning_rates(optimizer,step,args)
         if device.type=='cuda':torch.cuda.reset_peak_memory_stats();torch.cuda.synchronize()
         start=time.monotonic();metrics={};microbatches=0
-        for group in example_groups(rows,args.micro_batch_size):
+        length_batches = stage == 2 and args.stage2_batching == 'length'
+        for group in example_groups(rows,args.micro_batch_size,group_by='length' if length_batches else 'legacy'):
             examples=[(torch.tensor(r['input_ids'],device=device)[None],r['prompt_len']) for r in group]
             with amp(device):
-                batch=prepare_batch(examples,targets_fn,stage,args.teacher_batch_size)
+                batch=prepare_batch(examples,targets_fn,stage,args.teacher_batch_size,
+                                    padding_side='right' if length_batches else 'left')
                 result=backward_batch(model,student,batch,stage=stage,normalizer=float(count),chunk_size=chunk,
                     horizon_tokens=args.prefill_horizon_tokens,supervised_chunks=args.prefill_supervised_chunks,
                     window=args.tbptt,prompt_chunk_size=args.prompt_chunk_size,checkpointing=not args.no_checkpoint)
