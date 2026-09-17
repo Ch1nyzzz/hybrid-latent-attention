@@ -45,10 +45,18 @@ def main():
     if ref and args.base and ref.get("student_cfg"):
         p.error("a latent-student HF reference cannot validate the base model")
     if ref and not args.base:
+        if ref.get("prompt_chunk_size") != 0:
+            p.error("S6 vLLM comparison requires a full-prompt (chunk_size=0) HF reference")
         # mmap reads the checkpoint metadata without eagerly copying all weights.
         cfg = torch.load(args.student, map_location="cpu", mmap=True, weights_only=True)["cfg"]
         if cfg != ref.get("student_cfg"):
             p.error("HF reference student_cfg differs from the evaluated student")
+    if not args.base:
+        if args.compile_config:
+            p.error('S6 reference adapter supports eager execution only')
+        if args.backend not in ('', 'TRITON_ATTN'):
+            p.error('S6 reference adapter requires TRITON_ATTN')
+        args.backend='TRITON_ATTN'
     from vllm import LLM, SamplingParams
     Path(args.out).mkdir(parents=True, exist_ok=True)
     ovr = {"total_ut_steps": args.loops} if args.base else {"total_ut_steps": args.loops, "latent_student": args.student}
@@ -57,9 +65,9 @@ def main():
               max_num_batched_tokens=max(8192, args.max_model_len), gpu_memory_utilization=0.6, seed=0,
               **({"attention_backend": args.backend} if args.backend else {}), **({"attention_config": json.loads(args.attention_config)} if args.attention_config else {}))  # vLLM 0.26: env VLLM_ATTENTION_BACKEND is ignored
     tok = llm.get_tokenizer()
-    res = {"backend": args.backend or "auto", "base": args.base, "compile_config": args.compile_config}
+    res = {"prompt_chunk_size": 0, "loops": args.loops, "student": args.student, "serving_path": "base" if args.base else "s6-reference", "backend": args.backend or "auto", "base": args.base, "compile_config": args.compile_config}
     if ref:
-        sp = SamplingParams(temperature=0.0, max_tokens=args.max_new, logprobs=5)
+        sp = SamplingParams(temperature=0.0, max_tokens=args.max_new, logprobs=5, ignore_eos=True)
         prompts = [{"prompt_token_ids": r["prompt_ids"]} for r in ref["prompts"]]
         outs = llm.generate(prompts, sp)
         if len(outs) != len(prompts):
@@ -78,6 +86,8 @@ def main():
             rows.append({"id": r["id"], "vllm_first": first_tok, "hf_first": r["first_token"], "first_match": first_tok == r["first_token"],
                          "vllm_first_logprob": first_lp, "hf_first_logprob_same_token": ref_first_lp, "matching_prefix": match, "gen_len": len(g)})
             print(json.dumps({"CMP": rows[-1]}), flush=True)
+            rows[-1].update(prompt_ids=r['prompt_ids'], gen_ids=g,
+                            token_logprobs=[{str(t): lp.logprob for t, lp in step.items()} for step in o.outputs[0].logprobs])
         res["compare"] = rows
         diffs = [abs(x["vllm_first_logprob"] - x["hf_first_logprob_same_token"]) for x in rows if x["vllm_first_logprob"] is not None and x["hf_first_logprob_same_token"] is not None]
         res["summary"] = {"first_token_match": sum(x["first_match"] for x in rows) / len(rows), "mean_matching_prefix": sum(x["matching_prefix"] for x in rows) / len(rows),

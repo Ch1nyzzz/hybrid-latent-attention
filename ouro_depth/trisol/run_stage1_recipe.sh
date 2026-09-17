@@ -20,7 +20,7 @@ assert transformers.__version__ == '4.56.2'
 print(json.dumps({'event':'runtime','gpus':8,'torch':torch.__version__,'transformers':transformers.__version__}), flush=True)
 PY
 ARGS=(--model-path /trisol/input/model --data-dir /trisol/input/datasets/ds-0
-      --output-dir "$OUT" --steps 600 --global-batch-size 128 --micro-batch-size 4)
+      --output-dir "$OUT" --steps 600 --global-batch-size 128 --micro-batch-size 4 --writer block --writer-depth final --init teacher)
 if [[ "${TRISOL_RESUME:-false}" == true ]]; then
   ARGS+=(--resume "$TRISOL_RESUME_CHECKPOINT")
 fi

@@ -28,7 +28,9 @@ def prepare_batch(examples, teacher, stage, teacher_batch_size=1):
     if any(ids.ndim != 2 or ids.shape[0] != 1 or not 1 <= p < ids.shape[1]
            for ids, p in examples):
         raise ValueError('Expected ([1,L] IDs, nonempty prompt with continuation)')
-    prompts = [ids.shape[1] - 1 if stage == 1 else p for ids, p in examples]
+    if stage not in (2, 3):
+        raise ValueError("Replay supports stages 2 and 3")
+    prompts = [ids.shape[1] - 1 if stage == 2 else p for ids, p in examples]
     prompt = max(prompts)
     offsets = [prompt - p for p in prompts]
     length = max(off + ids.shape[1] - 1 for off, (ids, _) in zip(offsets, examples))
@@ -61,7 +63,10 @@ def prepare_batch(examples, teacher, stage, teacher_batch_size=1):
             logits[index, offset:offset+n] = teacher_logits[j, :n].detach()
             for k, v in outputs.items():
                 targets[k][index, offset:offset+n] = v[j, :n].detach()
-                denoms[k][index] = v[j, :n].detach().float().square().mean().clamp_min(1e-8)
+                selected = v[j, :n] if stage == 2 else v[j, group[j][1]:n]
+                if not selected.numel():
+                    raise ValueError('Stage3 requires at least two continuation tokens')
+                denoms[k][index] = selected.detach().float().square().mean().clamp_min(1e-8)
         del teacher_logits, outputs
     return ReplayBatch(ids, valid, prompt, logits, targets, denoms)
 
@@ -90,9 +95,13 @@ class _MemoryBoundedFKL(torch.autograd.Function):
         student, teacher, valid = ctx.saved_tensors
         grad = torch.empty_like(student)
         for start in range(0, student.shape[1], 32):
-            pred = F.softmax(student[:, start:start+32].float(), -1)
-            target = F.softmax(teacher[:, start:start+32].float(), -1)
-            value = (pred - target) * valid[:, start:start+32, None] * upstream
+            logp = F.log_softmax(student[:, start:start+32].float(), -1)
+            target = F.log_softmax(teacher[:, start:start+32].float(), -1).exp()
+            # Use the same native log-softmax VJP and operation order as the
+            # reference autograd graph. p-q is algebraically equivalent but its
+            # rounding amplified through the deep BF16 model during qualification.
+            grad_logp = -(target * (valid[:, start:start+32, None] * upstream))
+            value = torch.ops.aten._log_softmax_backward_data(grad_logp, logp, -1, torch.float32)
             grad[:, start:start+32] = value.to(student.dtype)
         return grad, None, None
 
@@ -101,54 +110,22 @@ def memory_bounded_fkl(student, teacher, valid):
     return _MemoryBoundedFKL.apply(student, teacher, valid)
 
 
-def backward_batch(model, student, batch, *, stage, mode, window, first_window,
-                   normalizers, checkpointing=True, lam_attn=.1, prefill_weight=.2,
-                   prefill_backend="math", low_memory_kl=False):
-    if mode not in ('main', 'detach') or not 1 <= first_window <= window:
-        raise ValueError('Invalid TBPTT mode/window')
-    engine = BatchedRollingEngine(model, student, checkpointing, prefill_backend=prefill_backend)
-    kl_fn = memory_bounded_fkl if low_memory_kl else masked_fkl
-    pref_count, dec_count, aux_count = normalizers
-    metrics = {key: 0.0 for key in ('prefill_kl_sum', 'decode_kl_sum', 'aux_sum', 'objective', 'windows')}
 
-    def targets(start, end):
-        return {k: (v[:, start:end], batch.denominators[k]) for k, v in batch.targets.items()}
-
-    def backward(loss):
-        if not bool(torch.isfinite(loss)):
-            raise FloatingPointError('Nonfinite batched objective')
-        metrics['objective'] += loss.detach()
-        loss.backward()
-        metrics['windows'] += 1
-        engine.detach_history()
-
-    p = batch.prompt
-    logits, aux = engine.prefill(batch.ids[:, :p], batch.valid[:, :p], targets(0, p))
-    if stage == 1:
-        pref = kl_fn(logits, batch.logits, batch.valid)
-        metrics['prefill_kl_sum'], metrics['aux_sum'] = pref.detach(), aux.detach()
-        backward(pref / pref_count + lam_attn * aux / aux_count)
-    else:
-        pref = kl_fn(logits[:, :-1], batch.logits[:, :p-1], batch.valid[:, :p-1])
-        dec = kl_fn(logits[:, -1:], batch.logits[:, p-1:p], batch.valid[:, p-1:p])
-        metrics['prefill_kl_sum'], metrics['decode_kl_sum'], metrics['aux_sum'] = pref.detach(), dec.detach(), aux.detach()
-        loss = prefill_weight * pref / max(1, pref_count) + dec / dec_count + lam_attn * aux / aux_count
-        if mode == 'detach':
-            backward(loss)
-            loss = None
-        limit, consumed = (first_window if mode == 'main' else 1), 0
-        for j in range(p, batch.ids.shape[1]):
-            logits, aux = engine.step(batch.ids[:, j:j+1], batch.valid[:, j:j+1], targets(j, j+1))
-            dec = kl_fn(logits, batch.logits[:, j:j+1], batch.valid[:, j:j+1])
-            metrics['decode_kl_sum'] += dec.detach()
-            metrics['aux_sum'] += aux.detach()
-            contribution = dec / dec_count + lam_attn * aux / aux_count
-            loss = contribution if loss is None else loss + contribution
-            consumed += 1
-            if consumed == limit or j == batch.ids.shape[1] - 1:
-                backward(loss)
-                loss, consumed = None, 0
-                limit = window if mode == 'main' else 1
-        if loss is not None:
-            backward(loss)
-    return {k: float(v) for k, v in metrics.items()}
+def backward_batch(model, student, batch, *, stage, normalizer, chunk_size=64,
+                   horizon_tokens=256, supervised_chunks=1, window=32,
+                   prompt_chunk_size=256, checkpointing=True, lam_attn=.1,
+                   precompute_loop1=False, parallel_windows=1, observer=None):
+    from .stage3_replay import backward_sliding, backward_decode
+    if precompute_loop1:
+        raise ValueError('S6 trains loop one: detached first-loop precomputation is forbidden')
+    if parallel_windows != 1:
+        raise ValueError('S6 currently qualifies serial windows only')
+    kwargs = dict(normalizer=normalizer, checkpointing=checkpointing,
+                  lam_attn=lam_attn, observer=observer)
+    if stage == 2:
+        return backward_sliding(model, student, batch, chunk_size=chunk_size,
+                                horizon_tokens=horizon_tokens, supervised_chunks=supervised_chunks, **kwargs)
+    if stage == 3:
+        return backward_decode(model, student, batch, window=window,
+                               prompt_chunk_size=prompt_chunk_size, **kwargs)
+    raise ValueError('Expected stage 2 or 3')

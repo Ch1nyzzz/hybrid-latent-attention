@@ -4,13 +4,15 @@
 
 研究方向以 [RESEARCH_OBJECTIVE.md](RESEARCH_OBJECTIVE.md) 为准：目标定义、与 LLA 的边界、RoPE 障碍、第一版架构（recurrent memory register + decoupled RoPE）、第一阶段实验与预注册判据。
 
-## 当前训练计划（2026-09-16 UTC）
+## 当前训练计划（2026-09-17）
 
-以[扩充语料、从 Stage1 重训的协议](ouro_depth/S5_EXPANDED_RESTART_RECIPE_20260916.md)为当前执行计划：总计30,000道数学题和70,000篇网页，从原始 Ouro 重新初始化 latent student；Stage1/2/3 分别训练600/600/400次更新，目标 global batch128，按样本数60%数学、40%网页。
+当前执行 [S6 block writer 训练计划](ouro_depth/S6_BLOCK_WRITER_RECIPE_20260916.md)：独立 E₂/E₃/E₄ 累加终态、第一轮独立 latent、共享 reader；chunk 内精确 K/V，历史直接 latent attention。Stage1 attention KL，Stage2/3 logits KL，均带输出 MSE，全部 student 参数可训练。
 
-本地运行记录已确认新 Stage1 的8卡资格检查与正式恢复更新。Stage2 GB128仍需完整更新验证；Stage3只训练 decode reader 的真实 rolling 路径仍待适配与验证。运行记录是历史快照，不代表实时任务状态。旧 warm-start 和 fresh I1/I2/I3 文档保留为历史方案。
+Stage2 默认严格滑动重放（256 token 历史视野、每次监督一个 chunk）；Stage3 固定 TBPTT32。三阶段600/600/400次更新、GB128、60%数学/40%网页，从本次联合 PCA 初始化重训。旧架构和训练入口已移除，历史文档保留。
 
-[Stage1/2 执行优化](ouro_depth/STAGE12_OPTIMIZATION_20260916.md)记录了 packed Stage1、批量 teacher 和 prefill 优化；默认路径及部署资格边界见该文档，不将候选优化视为已验证的训练加速。
+Stage1 已完成600步；Stage2 首个 GB128 更新实测5015秒（8×A100，C=32），当前严格滑动重放实现的吞吐不具备长期训练可行性，尚待优化和重新验证。一次更新成功不代表Stage2资格或收敛通过，详见计划中的吞吐诊断记录。
+
+本地 CPU 数值、梯度、入口恢复和两进程 Gloo 验证已覆盖。HF CUDA Graph/动态压缩解码通过有界 GPU 数值与显存检查；vLLM参考路径未通过预设数值容差，不用于正式打分。S6完整数学评测成绩尚未确认。下面的 S5 指标仅是历史基线。
 
 ## 已完成评测（2026-09-15）
 
@@ -28,10 +30,10 @@ S5 stage3b 的 8 卡 Triton MATH500 已完成：avg@4 **51.15%**、pass@4 **69.2
 | `ouro_depth/vllm_kvshare/` | 同一方案的 vLLM 0.26 实现、对拍与吞吐测试；hybrid KV 管理可复用于新 cache 的 serving |
 | `ouro_depth/matheval/` | vLLM 数学评测（MATH500 / AIME24 / AIME25 / HMMT / BeyondAIME）与判分 |
 | `ouro_depth/latent/train_stage1_recipe.py` | 新语料 Stage1 蒸馏、多卡训练与恢复 |
-| `ouro_depth/latent/train_recipe.py` | Prefill 与 rolling 训练入口；最新 Stage3 reader-only 协议尚待完成 |
+| `ouro_depth/latent/train_recipe.py` | S6 Stage2 滑动重放与 Stage3 TBPTT、全参数训练和恢复 |
 | `ouro_depth/latent/corpus_index.py` / `prepare_recipe_data.py` | 文档级数据划分、来源采样与恢复游标 |
 | `ouro_depth/latent/batched_engine.py` / `rolling_engine.py` | Latent prefill、真实 rolling decode 与训练计算图 |
-| `ouro_depth/vllm_latent/` | 直接消费 latent cache 的 vLLM 推理与评测 |
+| `ouro_depth/vllm_latent/` | S6 eager paged reference 推理与评测；当前未通过 GPU 数值容差 |
 | `ouro_depth/tests/` | 数值、数据、梯度路径及恢复检查 |
 
 ## 已有基线（Ouro-1.4B base，exact KV，8K 上限，2026-09-14）

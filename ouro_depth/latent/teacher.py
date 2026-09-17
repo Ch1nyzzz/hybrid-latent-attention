@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import torch
-from torch import Tensor, nn
+from torch import Tensor
 
 from .register import apply_rope
 from .vendor_model import load_teacher
@@ -11,10 +11,18 @@ from .vendor_model import load_teacher
 
 class Teacher:
     def __init__(self, model_path: str, loops: int, device: torch.device, dtype=torch.bfloat16):
-        self.model = load_teacher(model_path, loops, device, dtype)
-        self.loops = loops
-        self.cfg = self.model.config
-        self.layers = self.model.model.layers[: self.cfg.num_hidden_layers]
+        self._attach(load_teacher(model_path, loops, device, dtype), loops)
+
+    @classmethod
+    def wrap(cls, model, loops: int | None = None) -> "Teacher":
+        """Capture hooks on an already loaded (frozen) Ouro model; ``remove_hooks`` releases them."""
+        self = cls.__new__(cls)
+        self._attach(model, loops or model.config.total_ut_steps)
+        return self
+
+    def _attach(self, model, loops: int) -> None:
+        self.model, self.loops, self.cfg = model, loops, model.config
+        self.layers = model.model.layers[: self.cfg.num_hidden_layers]
         self.h_in: list[list[Tensor]] = [[] for _ in self.layers]
         self.out: list[list[Tensor]] = [[] for _ in self.layers]
         self.pos: tuple[Tensor, Tensor] | None = None
@@ -44,13 +52,15 @@ class Teacher:
         return hook
 
     @torch.no_grad()
-    def run(self, input_ids: Tensor) -> None:
-        """Populate h_in[l][t], out[l][t] (B, L, hidden) for t = 0..T-1 and pos = (cos, sin) (B, L, head_dim)."""
+    def run(self, input_ids: Tensor) -> Tensor:
+        """Populate h_in[l][t], out[l][t] (B, L, hidden) for t = 0..T-1 and pos = (cos, sin) (B, L, head_dim);
+        returns the final-loop hidden states after the last norm (B, L, hidden)."""
         for l in range(len(self.layers)):
             self.h_in[l].clear(); self.out[l].clear()
         self.pos = None
-        self.model.model(input_ids=input_ids, use_cache=False)
+        _, hs, _ = self.model.model(input_ids=input_ids, use_cache=False)
         assert all(len(x) == self.loops for x in self.h_in)
+        return hs[-1]
 
     def qkv(self, l: int, h: Tensor, cos: Tensor, sin: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """Frozen projections of one loop's attention input: RoPE'd q, RoPE'd k, v, and the pre-RoPE q (B, H, L, head_dim).

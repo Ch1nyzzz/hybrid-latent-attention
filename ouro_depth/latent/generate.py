@@ -1,15 +1,7 @@
-"""Greedy generation on a math benchmark with the latent cache (incremental decode) or the unmodified base model.
-
-Latent decode: the prompt is prefilled lockstep (full-sequence swapped forward) and every prompt token's final-loop
-register is stored; each generated token runs T loops, updating its own register per loop and attending to the stored
-history registers plus itself, then stores its final register (finalized if the student has an exit transform).
-No per-loop K/V is ever materialised.
-
-python -m ouro_depth.latent.generate --model-path M --data math500.jsonl --output O [--student S.pt] [--shard i --nshards n]
-"""
+"""S6 math generation using the same exact-current / terminal-history chunk engine as training."""
 from __future__ import annotations
 
-import argparse, json, signal, sys, time
+import argparse, json, os, signal, sys, time
 from pathlib import Path
 
 import torch
@@ -18,134 +10,124 @@ from torch.nn import functional as F
 from transformers import AutoTokenizer
 
 from .register import LatentStudent
-from .swap import Swapped
 from .vendor_model import load_teacher
 
 INSTR = "\nPlease reason step by step, and put your final answer within \\boxed{}."
 
 
 class LatentDecoder:
-    """Batched incremental decode over per-layer register caches."""
-
-    def __init__(self, model, student: LatentStudent, max_len: int, self_final: bool = False):
-        self.model, self.student, self.self_final = model, student, self_final
-        self.layers = model.model.layers[: model.config.num_hidden_layers]
-        self.T = model.config.total_ut_steps
-        self.reg_dim = student.cfg["rank"] + student.cfg["rank_v"]
-        self.state = self.reg_dim + 2 * student.cfg["rank1"]      # cache row = [register ; loop-1 latent]
-        dev = next(model.parameters()).device
-        dummy = torch.zeros(1, max_len, model.config.hidden_size, device=dev, dtype=torch.bfloat16)
-        self.cos_all, self.sin_all = model.model.rotary_emb(dummy, torch.arange(max_len, device=dev)[None])  # (1, max_len, D)
-        self.max_len = max_len
-
-    @torch.no_grad()
-    def prefill(self, ids: Tensor) -> tuple[list[Tensor], Tensor]:
-        """One prompt (1, n0) -> per-layer final registers (1, n0, state) and next-token logits."""
-        sw = Swapped(self.model, self.student, None)
-        try:
-            with torch.autocast(ids.device.type, dtype=torch.bfloat16):
-                _, hs, _ = self.model.model(input_ids=ids, use_cache=False)
-        finally:
-            sw.restore()
-        with torch.autocast(ids.device.type, dtype=torch.bfloat16):
-            regs = [sw.student.layers[i].finalize(sw.regs[i]) for i in range(len(self.layers))]
-            if self.student.cfg["rank1"]:
-                regs = [torch.cat([r, c1.to(r.dtype)], -1) for r, c1 in zip(regs, sw.c1)]
-        return regs, self.model.lm_head(hs[-1][:, -1]).float()
+    """S6 reference generation. Request-relative prompt chunking is explicit."""
+    def __init__(self, model, student, max_len, prompt_chunk_size=256):
+        self.model, self.student, self.max_len = model, student, max_len
+        self.prompt_chunk_size = prompt_chunk_size
 
     @staticmethod
-    def pick(logits: Tensor, temperature: float, top_p: float) -> Tensor:
-        """Greedy if temperature == 0, else nucleus sampling (vLLM-style top_p on the temperature-scaled distribution)."""
+    def pick(logits, temperature, top_p):
         if temperature <= 0:
             return logits.argmax(-1)
-        probs = F.softmax(logits / temperature, -1)
-        sp, si = probs.sort(-1, descending=True)
-        keep = (sp.cumsum(-1) - sp) < top_p                    # keep tokens whose cumulative mass before them is < top_p
-        sp = sp * keep
-        return si.gather(-1, torch.multinomial(sp / sp.sum(-1, keepdim=True), 1)).squeeze(-1)
+        if not 0 < top_p <= 1:
+            raise ValueError('top_p must be in (0,1]')
+        p, indices = (logits.float()/temperature).softmax(-1).sort(-1, descending=True)
+        p = p * ((p.cumsum(-1)-p) < top_p)
+        return indices.gather(-1, torch.multinomial(p,1)).squeeze(-1)
 
     @torch.no_grad()
-    def generate(self, prompts: list[Tensor], max_new: int, stop_ids: set[int], temperature: float = 0.0, top_p: float = 1.0) -> list[list[int]]:
-        B = len(prompts); dev = prompts[0].device
-        hist = [torch.zeros(B, self.max_len, self.state, device=dev, dtype=torch.bfloat16) for _ in self.layers]
-        lens = torch.tensor([p.shape[1] for p in prompts], device=dev)
-        next_tok = torch.zeros(B, dtype=torch.long, device=dev)
-        for b, p in enumerate(prompts):
-            regs, logits = self.prefill(p)
-            for i in range(len(self.layers)):
-                hist[i][b, : p.shape[1]] = regs[i][0].to(hist[i].dtype)
-            next_tok[b] = self.pick(logits, temperature, top_p)
-        out = [[int(next_tok[b])] for b in range(B)]
-        done = torch.tensor([int(next_tok[b]) in stop_ids for b in range(B)], device=dev)
-        cur: list[Tensor | None] = [None] * len(self.layers)
-        cur1: list[Tensor | None] = [None] * len(self.layers)
-        sl_all = self.student.layers; R = self.reg_dim
-        originals = [l.self_attn.forward for l in self.layers]
+    def prefill(self, ids):
+        from .batched_engine import BatchedRollingEngine
+        from .training_common import amp
+        engine = BatchedRollingEngine(self.model,self.student,False)
+        with amp(ids.device):
+            pred,_ = engine.prefill(ids,chunk_size=self.prompt_chunk_size or ids.shape[1],last_logits_only=True)
+        engine.detach_history()
+        return engine.prefix, pred[:,-1].float()
 
-        def make(i):
-            attn, sl = self.layers[i].self_attn, sl_all[i]
+    @torch.no_grad()
+    def generate(self, prompts, max_new, stop_ids, temperature=0., top_p=1.):
+        from .batched_engine import BatchedRollingEngine
+        from .training_common import amp
+        if max_new < 1: raise ValueError('max_new must be positive')
+        results=[]
+        for ids in prompts:
+            if ids.shape[1]>=self.max_len:raise ValueError('Prompt exceeds context limit')
+            engine=BatchedRollingEngine(self.model,self.student,False)
+            with amp(ids.device):
+                pred,_=engine.prefill(ids,chunk_size=self.prompt_chunk_size or ids.shape[1],last_logits_only=True)
+                engine.detach_history()
+                generated=[]
+                for _ in range(min(max_new,self.max_len-ids.shape[1])):
+                    token=self.pick(pred[:,-1].float(),temperature,top_p)
+                    generated.append(int(token.item()))
+                    if generated[-1] in stop_ids:break
+                    if len(generated)<min(max_new,self.max_len-ids.shape[1]):
+                        pred,_=engine.step(token[:,None]);engine.detach_history()
+            results.append(generated)
+        return results
 
-            def forward(hidden_states, position_embeddings, current_ut: int = 0, **_):
-                cos_q, sin_q = position_embeddings                       # (B, 1, D) at each sequence's own position
-                h = hidden_states                                       # (B, 1, hidden)
-                u = sl.cand(h)
-                if current_ut == 0 or sl.writer == "final":
-                    prev = torch.zeros_like(u)
-                    c = u if sl.writer != "register" else torch.sigmoid(sl.gate(torch.cat([prev, h], -1))) * u
-                elif sl.writer == "first":
-                    c = cur[i]
-                else:
-                    prev = cur[i]
-                    g = torch.sigmoid(sl.gate(torch.cat([prev, h], -1)))
-                    c = (1 - g) * prev + g * u
-                cur[i] = c
-                n = int(lens.max())
-                if current_ut == 0 and sl.rank1:
-                    cur1[i] = sl.write1(h)
-                    keys = torch.cat([hist[i][:, :n, R:], cur1[i]], 1)   # loop-1 latents of history + own
-                else:
-                    keys = torch.cat([hist[i][:, :n, :R], c], 1)         # (B, n+1, reg_dim): history registers + self
-                cos_k = torch.cat([self.cos_all[:, :n].expand(B, -1, -1), cos_q], 1)
-                sin_k = torch.cat([self.sin_all[:, :n].expand(B, -1, -1), sin_q], 1)
-                q = attn.q_proj(h).view(B, 1, -1, attn.head_dim).transpose(1, 2)
-                logits = sl.scores(current_ut, q, h, keys, cos_k, sin_k, cos_q, sin_q, final=True).float()   # history: cached finals
-                if sl.split_readers and not self.self_final and not (current_ut == 0 and sl.rank1):   # self key with the lockstep reader set
-                    logits[..., -1:] = sl.scores(current_ut, q, h, keys[:, -1:], cos_q, sin_q, cos_q, sin_q, final=False).float()
-                valid = torch.cat([torch.arange(n, device=dev)[None] < lens[:, None], torch.ones(B, 1, dtype=torch.bool, device=dev)], 1)
-                logits = logits.masked_fill(~valid[:, None, None, :], -1e4)
-                probs = F.softmax(logits, -1).to(h.dtype)
-                if sl.split_readers and not self.self_final and not (current_ut == 0 and sl.rank1):
-                    out = sl.read_out(current_ut, probs[..., :-1], keys[:, :-1], final=True) + sl.read_out(current_ut, probs[..., -1:], keys[:, -1:], final=False)
-                else:
-                    out = sl.read_out(current_ut, probs, keys, final=True)
-                return attn.o_proj(out), None
 
-            return forward
+class BatchedLatentDecoder(LatentDecoder):
+    """Serial prompt prefill, then padded batched decode with per-row validity.
 
-        for i, l in enumerate(self.layers):
-            l.self_attn.forward = make(i)
-        try:
-            for _ in range(max_new - 1):
-                if bool(done.all()) or int(lens.max()) + 1 >= self.max_len:
+    Prompt padding is masked in history; completed rows never add visible tokens.
+    The same engine and prompt policy are used by the serial reference.
+    """
+    @torch.no_grad()
+    def prefill_batch(self, prompts):
+        from .batched_engine import BatchedRollingEngine
+        if any(ids.shape[0] != 1 or ids.shape[1] >= self.max_len for ids in prompts):
+            raise ValueError('Expected individual prompts shorter than context limit')
+        device = prompts[0].device
+        histories, predictions = zip(*(self.prefill(ids) for ids in prompts))
+        lengths = [ids.shape[1] for ids in prompts]
+        width = max(lengths)
+        valid = torch.arange(width, device=device)[None] < torch.tensor(lengths, device=device)[:, None]
+        prefix = tuple(torch.cat([F.pad(rows[layer], (0,0,0,width-length))
+                                  for rows,length in zip(histories,lengths)], dim=0)
+                       for layer in range(len(histories[0])))
+        del histories
+        engine = BatchedRollingEngine(self.model, self.student, False)
+        engine.seed_history(prefix, valid)
+        del prefix
+        return engine, torch.cat(predictions)
+
+    @torch.no_grad()
+    def generate(self, prompts, max_new, stop_ids, temperature=0., top_p=1.):
+        from .training_common import amp
+        if max_new < 1:
+            raise ValueError('max_new must be positive')
+        if not prompts:
+            return []
+        started = time.monotonic()
+        progress_every = int(os.environ.get('S6_DECODE_PROGRESS', '0'))
+        device = prompts[0].device
+        lengths = [ids.shape[1] for ids in prompts]
+        engine, pred = self.prefill_batch(prompts)
+        limits = torch.tensor([min(max_new, self.max_len-length) for length in lengths], device=device)
+        active = torch.ones(len(prompts), device=device, dtype=torch.bool)
+        outputs = [[] for _ in prompts]
+        with amp(device):
+            for step in range(int(limits.max())):
+                # Only active rows consume sampling RNG; inactive rows are masked.
+                tokens = torch.zeros(len(prompts), device=device, dtype=torch.long)
+                tokens[active] = self.pick(pred[active].float(), temperature, top_p)
+                selected, live = tokens.tolist(), active.tolist()
+                for i, (token, is_live) in enumerate(zip(selected,live)):
+                    if is_live:
+                        outputs[i].append(token)
+                active = active & (step+1 < limits)
+                if stop_ids:
+                    active &= ~torch.isin(tokens, tokens.new_tensor(sorted(stop_ids)))
+                if progress_every > 0 and (step + 1) % progress_every == 0:
+                    print(json.dumps({'DECODE_PROGRESS': dict(steps=step+1,
+                          generated_tokens=sum(map(len, outputs)), active=int(active.sum()),
+                          compute_batch=getattr(engine, 'batch_size', len(prompts)),
+                          seconds=round(time.monotonic()-started, 2))}), flush=True)
+                if not bool(active.any()):
                     break
-                with torch.autocast(dev.type, dtype=torch.bfloat16):
-                    _, hs, _ = self.model.model(input_ids=next_tok[:, None], position_ids=lens[:, None], use_cache=False)
-                    logits = self.model.lm_head(hs[-1][:, -1]).float()
-                with torch.autocast(dev.type, dtype=torch.bfloat16):
-                    for i in range(len(self.layers)):
-                        row = sl_all[i].finalize(cur[i])[:, 0]
-                        if sl_all[i].rank1: row = torch.cat([row, cur1[i][:, 0].to(row.dtype)], -1)
-                        hist[i][torch.arange(B, device=dev), lens] = row.to(hist[i].dtype)
-                lens = lens + 1
-                next_tok = self.pick(logits, temperature, top_p)
-                for b in range(B):
-                    if not done[b]:
-                        out[b].append(int(next_tok[b]))
-                        if int(next_tok[b]) in stop_ids: done[b] = True
-        finally:
-            for l, f in zip(self.layers, originals):
-                l.self_attn.forward = f
-        return out
+                logits, _ = engine.step(tokens[:,None], valid=active[:,None])
+                engine.detach_history()
+                pred = logits[:, -1].float()
+                del logits  # Do not pin a previous CUDA graph pool across growth.
+        return outputs
 
 
 def grade(pred: str, gold: str, timeout: int = 5) -> bool:
@@ -168,11 +150,21 @@ def main():
     p.add_argument("--student", default="", help="latent student checkpoint; empty = base model")
     p.add_argument("--loops", type=int, default=4); p.add_argument("--max-new", type=int, default=3072); p.add_argument("--batch", type=int, default=16)
     p.add_argument("--n", type=int, default=1, help="samples per problem (avg@n / pass@n)"); p.add_argument("--temperature", type=float, default=0.0); p.add_argument("--top-p", type=float, default=1.0)
-    p.add_argument("--seed", type=int, default=0); p.add_argument("--self-final", action="store_true", help="decode: self key read with the final-register reader set")
+    p.add_argument("--seed", type=int, default=0); p.add_argument("--prompt-chunk-size", type=int, default=256, help="0 = full prompt; record this policy with results")
+    p.add_argument("--batched-latent", action="store_true", help="batch decode using the shared S6 engine")
+    p.add_argument("--cuda-graph-latent", action="store_true", help="capture batched latent decode in CUDA graphs (inference only)")
+    p.add_argument("--compact-finished", action="store_true", help="remove finished rows from CUDA graph compute batches")
+    p.add_argument("--resume-from", default="", help="import validated completed answers from this directory")
+    p.add_argument("--max-model-len", type=int, default=0, help="0 retains the historical 4096+max_new limit")
     p.add_argument("--shard", type=int, default=0); p.add_argument("--nshards", type=int, default=1); p.add_argument("--limit", type=int, default=0)
     args = p.parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = load_teacher(args.model_path, args.loops, device)
+    if args.cuda_graph_latent and (not args.student or device.type != "cuda"):
+        p.error('--cuda-graph-latent requires a student checkpoint and CUDA')
+    if args.compact_finished and not args.cuda_graph_latent:
+        p.error('--compact-finished requires --cuda-graph-latent')
+    model = load_teacher(args.model_path, args.loops, device,
+                         dtype=torch.bfloat16 if device.type == "cuda" else torch.float32)
     tok = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
     stop_ids = {i for i in (tok.eos_token_id, tok.convert_tokens_to_ids("<|im_end|>")) if isinstance(i, int) and i >= 0}
     rows = [json.loads(l) for l in open(args.data)]
@@ -181,14 +173,48 @@ def main():
     student = None
     if args.student:
         ck = torch.load(args.student, map_location="cpu"); student = LatentStudent(**ck["cfg"]).to(device).eval(); student.load_state_dict(ck["student"])
-    dec = LatentDecoder(model, student, max_len=4096 + args.max_new, self_final=args.self_final) if student is not None else None
+    decoder_cls = BatchedLatentDecoder if args.batched_latent else LatentDecoder
+    if args.cuda_graph_latent:
+        from .graph_generate import GraphLatentDecoder
+        decoder_cls = GraphLatentDecoder
+    decoder_kw = dict(compact_finished=args.compact_finished) if args.cuda_graph_latent else {}
+    dec = decoder_cls(model, student, max_len=args.max_model_len or 4096 + args.max_new, prompt_chunk_size=args.prompt_chunk_size, **decoder_kw) if student is not None else None
     out_dir = Path(args.output); out_dir.mkdir(parents=True, exist_ok=True)
+    samples = [(r, k) for r in rows for k in range(args.n)]           # each problem n times
+    from .eval_resume import load_completed
+    protocol = dict(student=Path(args.student).name,
+                    checkpoint_asset=os.environ.get('S6_CHECKPOINT_ASSET', ''),
+                    base_asset=os.environ.get('S6_BASE_ASSET', ''),
+                    loops=args.loops, max_new=args.max_new,
+                    max_model_len=args.max_model_len or 4096+args.max_new, n=args.n,
+                    temperature=args.temperature, top_p=args.top_p, seed=args.seed,
+                    prompt_chunk_size=args.prompt_chunk_size, shard=args.shard, nshards=args.nshards)
+    completed, resume_metadata = load_completed(args.resume_from, samples, protocol)
+    seen = {(r['id'], r['sample']) for r in completed}
+    pending = [(r,k) for r,k in samples if (r['id'],k) not in seen]
     fout = open(out_dir / f"shard{args.shard}.jsonl", "w")
     torch.manual_seed(args.seed + args.shard)
-    samples = [(r, k) for r in rows for k in range(args.n)]           # each problem n times
     t0 = time.time(); n_ok = 0; n_tok = 0; n_trunc = 0; per_problem: dict[str, list[bool]] = {}
-    for s in range(0, len(samples), args.batch):
-        batch = samples[s: s + args.batch]
+    def persist_protocol():
+        current = dict(protocol, batch=args.batch, compact_finished=args.compact_finished,
+                       backend='hf-cuda-graph' if args.cuda_graph_latent else 'hf-batched' if args.batched_latent else 'hf-serial',
+                       source_job=os.environ.get('S6_EVAL_JOB_ID', ''),
+                       source_attempt=os.environ.get('S6_EVAL_ATTEMPT', ''),
+                       elapsed_seconds=round(time.time()-t0+resume_metadata.get('elapsed_seconds', 0), 2))
+        temporary=out_dir/'resume-protocol.json.tmp'
+        temporary.write_text(json.dumps(current))
+        temporary.replace(out_dir/'resume-protocol.json')
+    for r in completed:
+        fout.write(json.dumps(r)+'\n')
+        n_ok += r['correct']; n_tok += r['tokens']; n_trunc += r['truncated']
+        per_problem.setdefault(r['id'], []).append(r['correct'])
+    fout.flush()
+    persist_protocol()
+    if completed:
+        print(json.dumps({'EVAL_RESUME': dict(completed=len(completed), pending=len(pending),
+              source=args.resume_from, sampling_restart_seed=args.seed+args.shard)}), flush=True)
+    for s in range(0, len(pending), args.batch):
+        batch = pending[s: s + args.batch]
         texts = [tok.apply_chat_template([{"role": "user", "content": r["problem"] + INSTR}], tokenize=False, add_generation_prompt=True) for r, _ in batch]
         enc = [tok(t, return_tensors="pt", add_special_tokens=False).input_ids.to(device) for t in texts]
         if dec is not None:
@@ -203,15 +229,26 @@ def main():
                     g = model.generate(input_ids=ids, max_new_tokens=args.max_new, past_key_values=cache, use_cache=True, **sample_kw,
                                        pad_token_id=tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id, eos_token_id=list(stop_ids))
                 gens.append(g[0, ids.shape[1]:].tolist())
-        for (r, k), gg in zip(batch, gens):
+        if len(gens) != len(batch):
+            raise RuntimeError('generation returned an incomplete batch')
+        for index, ((r, k), gg) in enumerate(zip(batch, gens)):
             text = tok.decode(gg, skip_special_tokens=True)
-            ok = grade(text, r["answer"]); trunc = not any(x in stop_ids for x in gg[-2:]) and len(gg) >= args.max_new - 1
+            limit = min(args.max_new, dec.max_len-enc[index].shape[1]) if dec is not None else args.max_new
+            ok = grade(text, r["answer"]); trunc = not any(x in stop_ids for x in gg[-1:]) and len(gg) >= limit
             n_ok += ok; n_tok += len(gg); n_trunc += trunc; per_problem.setdefault(r["id"], []).append(ok)
             fout.write(json.dumps({"id": r["id"], "sample": k, "gold": r["answer"], "correct": ok, "tokens": len(gg), "truncated": trunc, "text": text}) + "\n"); fout.flush()
-        print(json.dumps({"GEN_PROGRESS": {"done": s + len(batch), "of": len(samples), "acc": round(n_ok / (s + len(batch)), 4), "elapsed": round(time.time() - t0)}}), flush=True)
+        done = len(completed) + s + len(batch)
+        persist_protocol()
+        print(json.dumps({"GEN_PROGRESS": {"done": done, "of": len(samples), "acc": round(n_ok / done, 4), "elapsed": round(time.time() - t0)}}), flush=True)
     N = max(1, len(samples))
-    summ = {"mode": "latent" if student is not None else "base", "shard": args.shard, "n_problems": len(rows), "n_samples": args.n, "temperature": args.temperature, "top_p": args.top_p,
+    summ = {"mode": "latent" if student is not None else "base", "backend": "hf-cuda-graph" if args.cuda_graph_latent else "hf-batched" if args.batched_latent else "hf-serial", "batch": args.batch, "loops": args.loops, "student": args.student, "max_new": args.max_new, "max_model_len": args.max_model_len or 4096+args.max_new, "total_samples": len(samples), "seed": args.seed, "prompt_chunk_size": args.prompt_chunk_size, "shard": args.shard, "n_problems": len(rows), "n_samples": args.n, "temperature": args.temperature, "top_p": args.top_p,
             "avg_at_n": n_ok / N, "pass_at_n": sum(any(v) for v in per_problem.values()) / max(1, len(per_problem)), "mean_tokens": n_tok / N, "trunc_rate": n_trunc / N, "seconds": round(time.time() - t0)}
+    summ['compact_finished'] = args.compact_finished
+    summ['resumed_samples'] = len(completed)
+    summ['resume_metadata'] = resume_metadata
+    summ['sampling_restart_seed'] = args.seed+args.shard if completed else None
+    summ['seconds_this_attempt'] = summ['seconds']
+    summ['seconds'] += resume_metadata.get('elapsed_seconds', 0)
     json.dump(summ, open(out_dir / f"summary{args.shard}.json", "w"))
     print(json.dumps({"GEN_SUMMARY": summ}), flush=True); print("GEN_DONE", flush=True)
 

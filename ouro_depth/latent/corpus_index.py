@@ -9,6 +9,7 @@ class RecordIndex:
     def __init__(self, path):
         self.path = Path(path)
         self.rows = {"openr1": [], "fineweb": []}
+        self.prompt_lengths = {}
         with self.path.open("rb") as stream:
             while True:
                 offset = stream.tell()
@@ -17,6 +18,7 @@ class RecordIndex:
                     break
                 row = json.loads(line)
                 self.rows[row["source"]].append((offset, len(row["input_ids"])))
+                self.prompt_lengths[offset] = row.get("prompt_len", 1)
         self.stream = self.path.open("rb")
         self._eligible = {}
         self._orders = {}
@@ -38,7 +40,7 @@ class RecordIndex:
             if length >= min_length:
                 return self._read(offset)
 
-    def sample_at(self, sequence_id, *, seed, stage, min_length=64):
+    def sample_at(self, sequence_id, *, seed, stage, min_length=64, min_continuation=0):
         """60/40 example mix; each source visits all eligible chunks before reuse.
 
         sequence_id is stage-local and global across ranks, not rank-local.
@@ -50,19 +52,19 @@ class RecordIndex:
         cycle, slot = divmod(sequence_id, 5)
         source = "openr1" if slot < 3 else "fineweb"
         ordinal = cycle * (3 if source == "openr1" else 2) + (slot if slot < 3 else slot - 3)
-        key = (source, min_length)
+        key = (source, min_length, min_continuation)
         if key not in self._eligible:
-            self._eligible[key] = [offset for offset, length in self.rows[source] if length >= min_length]
+            self._eligible[key] = [offset for offset, length in self.rows[source] if length >= min_length and length - self.prompt_lengths[offset] >= min_continuation]
         offsets = self._eligible[key]
         if not offsets:
             raise ValueError(f"No eligible {source} record in {self.path}")
         epoch, position = divmod(ordinal, len(offsets))
-        order_key = (source, min_length, seed, str(stage), epoch)
+        order_key = (source, min_length, min_continuation, seed, str(stage), epoch)
         if order_key not in self._orders:
             entropy = hashlib.sha256(json.dumps(order_key).encode()).digest()
             order = list(range(len(offsets)))
             random.Random(int.from_bytes(entropy, "big")).shuffle(order)
             # Retain only the latest permutation for each source/selection rule.
-            self._orders = {k: v for k, v in self._orders.items() if k[:2] != key}
+            self._orders = {k: v for k, v in self._orders.items() if k[:3] != key}
             self._orders[order_key] = order
         return self._read(offsets[self._orders[order_key][position]])

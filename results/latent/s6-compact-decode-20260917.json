@@ -1,0 +1,102 @@
+{
+  "numerical": [
+    {
+      "width": 250,
+      "positions": 1434,
+      "mean_kl": 5.921450693870965e-05,
+      "max_kl": 0.003747067879885435,
+      "top1": 0.99721059972106,
+      "compute_batches": [
+        8,
+        32,
+        64
+      ],
+      "passed": true
+    },
+    {
+      "width": 4096,
+      "positions": 1434,
+      "mean_kl": 1.0368988932515632e-05,
+      "max_kl": 0.0027984590269625187,
+      "top1": 1.0,
+      "compute_batches": [
+        8,
+        32,
+        64
+      ],
+      "passed": true
+    }
+  ],
+  "benchmarks": [
+    {
+      "width": 128,
+      "batch": 32,
+      "live": 32,
+      "steps": 128,
+      "seconds": 5.678510787896812,
+      "useful_tokens_per_second": 721.315878932593,
+      "peak_gib": 4.651102542877197
+    },
+    {
+      "width": 128,
+      "batch": 64,
+      "live": 64,
+      "steps": 128,
+      "seconds": 6.240934987552464,
+      "useful_tokens_per_second": 1312.6238322204817,
+      "peak_gib": 5.229311466217041
+    },
+    {
+      "width": 4096,
+      "batch": 32,
+      "live": 32,
+      "steps": 128,
+      "seconds": 10.335658609867096,
+      "useful_tokens_per_second": 396.2979191369276,
+      "peak_gib": 14.298840999603271
+    },
+    {
+      "width": 4096,
+      "batch": 64,
+      "live": 64,
+      "steps": 128,
+      "seconds": 14.207771273329854,
+      "useful_tokens_per_second": 576.5858587108331,
+      "peak_gib": 24.24439764022827
+    },
+    {
+      "width": 8192,
+      "batch": 32,
+      "live": 2,
+      "steps": 128,
+      "seconds": 14.833514148369431,
+      "useful_tokens_per_second": 17.258216592468123,
+      "peak_gib": 23.97108221054077
+    },
+    {
+      "width": 8192,
+      "batch": 8,
+      "live": 2,
+      "steps": 128,
+      "seconds": 9.779917802661657,
+      "useful_tokens_per_second": 26.176089121150714,
+      "peak_gib": 9.494458675384521
+    }
+  ],
+  "provenance": {
+    "checkpoint": "loop-s6-block-stage1-0916:1/student-600.pt",
+    "base": "ouro-1-4b:1",
+    "gpu": "A100-SXM4-80GB",
+    "timing_scope": "fixed-token decode including capture; excluding prefill and sampling",
+    "minimum_compute_batch": 8,
+    "history_bucket": 256
+  },
+  "deployment_long_memory": {
+    "batch": 64,
+    "initial_width": 10230,
+    "final_width": 10250,
+    "peak_gib": 52.01710748672485,
+    "passed": true,
+    "kind": "synthetic-cache-memory-and-state"
+  }
+}

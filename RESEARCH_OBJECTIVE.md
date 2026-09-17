@@ -2,6 +2,10 @@
 
 2026-09-14 定稿，依据本日讨论。本文是仓库唯一的研究方向；此前"训练更深循环学会更强推理"一线（V1–V10、Huginn）的代码与报告已于同日清理出工作区，完整保留在 git 历史（提交 `62f4130` 及之前）。
 
+## 当前实现边界（2026-09-16）
+
+长期目标不变；当前里程碑以 [S6 计划](ouro_depth/S6_BLOCK_WRITER_RECIPE_20260916.md) 为执行规范：固定 T=4 的终态 block writer、第一轮独立 latent、当前 chunk 精确 K/V 与历史直接 latent attention。本文下述第一版 gated/decoupled-RoPE 架构及随机 writer-depth 训练属于历史设计，相关旧训练实现已移除。S6 的可训练 dense reader 只在 PCA 初始化时保证频率对齐，尚未证明训练后严格等变或 adaptive-depth 能力。
+
 ## 1. 一句话目标
 
 > **Decouple KV-cache representation from recurrent depth: each token stores a fixed-size, loop-invariant latent memory that can be directly queried by arbitrary recurrent depths without materializing loop-specific KV states.**

@@ -1,0 +1,91 @@
+{
+  "qualification": [
+    {
+      "width": 250,
+      "positions": 19,
+      "mean_kl": 0.00031247244777133395,
+      "max_kl": 0.0015216260217130184,
+      "top1": 1.0,
+      "max_logprob_error": 0.21009349822998047,
+      "captures": 2,
+      "passed": true
+    },
+    {
+      "width": 4096,
+      "positions": 35,
+      "mean_kl": 0.00042475747343684946,
+      "max_kl": 0.00353270024061203,
+      "top1": 1.0,
+      "max_logprob_error": 0.2492508888244629,
+      "captures": 1,
+      "passed": true
+    }
+  ],
+  "benchmarks": [
+    {
+      "mode": "eager",
+      "width": 128,
+      "batch": 32,
+      "steps": 128,
+      "first_step_seconds": 0.2105788215994835,
+      "steady_seconds": 18.472172810696065,
+      "steady_tokens_per_second": 220.0066035353889,
+      "total_seconds": 18.68275163229555,
+      "total_tokens_per_second": 219.23965380557408,
+      "peak_gib": 5.2468156814575195
+    },
+    {
+      "mode": "graph",
+      "width": 128,
+      "batch": 32,
+      "steps": 128,
+      "first_step_seconds": 0.5130758741870522,
+      "steady_seconds": 5.117727238684893,
+      "steady_tokens_per_second": 794.1025010634075,
+      "total_seconds": 5.630803112871945,
+      "total_tokens_per_second": 727.4273168309855,
+      "peak_gib": 4.869439125061035
+    },
+    {
+      "mode": "eager",
+      "width": 4096,
+      "batch": 32,
+      "steps": 128,
+      "first_step_seconds": 0.1899519134312868,
+      "steady_seconds": 18.553589436225593,
+      "steady_tokens_per_second": 219.04117335188542,
+      "total_seconds": 18.74354134965688,
+      "total_tokens_per_second": 218.5286079930131,
+      "peak_gib": 31.683727264404297
+    },
+    {
+      "mode": "graph",
+      "width": 4096,
+      "batch": 32,
+      "steps": 128,
+      "first_step_seconds": 0.9164832010865211,
+      "steady_seconds": 9.43803737591952,
+      "steady_tokens_per_second": 430.5979980932271,
+      "total_seconds": 10.354520577006042,
+      "total_tokens_per_second": 395.576016247035,
+      "peak_gib": 22.868854522705078
+    }
+  ],
+  "provenance": {
+    "checkpoint": "loop-s6-block-stage1-0916:1/student-600.pt",
+    "model": "ouro-1-4b:1",
+    "gpu": "A100-SXM4-80GB",
+    "code_base": "loop-s6-math-code-0917:3",
+    "numerical_seed": 719,
+    "history_bucket": 256,
+    "timing_scope": "fixed-token decode including capture; excludes prefill and sampling",
+    "synthetic_long_memory": {
+      "batch": 32,
+      "start_width": 10230,
+      "end_width": 10250,
+      "peak_gib": 49.57961320877075,
+      "passed": true
+    },
+    "real_math_greedy_eos_context_passed": true
+  }
+}

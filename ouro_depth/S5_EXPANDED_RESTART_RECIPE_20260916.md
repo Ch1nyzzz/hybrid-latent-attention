@@ -61,3 +61,12 @@ Stage2/3 的600/400步沿用已确认预算；Stage1默认保留旧实验600次�
 - Stage2/3未启动；Stage2仍需GB128完整更新验证，Stage3 reader-only路径仍待适配与验证。
 
 运行证据与边界见 `artifacts/expanded-s5-restart-20260916/RUN_STATUS.md`。
+
+
+## Stage1/2 执行优化资格检查（2026-09-16）
+
+- Stage1候选：`--execution packed --packed-batch-size 4 --padding-ratio 1.35 --combined-backward --compiled-loss`，参考microbatch仍为4。同轮两次完整更新平均26.416→24.892秒，显存37.08GiB，首步梯度相对L2差0.0381%。这是编译后短测；当前正式Stage1保持原实现，避免为小幅提速回退已有进度。
+- Stage2选用：`--prefill-optimized --prefill-backend math --teacher-batch-size 1 --prefill-checkpoint attention --micro-batch-size 2`。八卡GB128实测完整更新35.332→31.074秒，减少12.05%，峰值已分配60.84GiB；首步全参数梯度与参考完全相同，两步loss与梯度范数相同。microbatch4显存不足，不启用。SDPA候选的BF16梯度偏差较大，也不启用。
+- 下一次正式Stage2仍需从**本次新Stage1的student-600.pt**起步。使用`--workflow stage1-warmstart --steps 600,400 --global-batch-size 128 --batched-replay --sampling source-epochs --warmup-steps 25 --save-every 25 --eval-every 100 --stop-after 600`，加上上述Stage2优化选项及模型/语料/输出/新权重路径。`--stop-after 600`限定在prefill阶段末保存退出，避免自动进入尚未完成适配的Stage3。
+- 不使用`--preserve-sample-budget`。旧`run_fresh_recipe.sh`在启用batched replay时会自动加该选项，不能直接用于本轮600/400固定更新预算。此处为已验证配置记录，尚未启动正式Stage2。
+- 对照任务`2100073781291659264`已succeeded；三种可用配置各完成8rank×2次有限更新。28项受影响本地测试已通过。短测不证明全程收敛或整阶段的固定加速比例。完整证据见[优化报告](STAGE12_OPTIMIZATION_20260916.md)。

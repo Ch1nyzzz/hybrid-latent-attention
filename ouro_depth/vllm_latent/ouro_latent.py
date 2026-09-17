@@ -1,14 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Ouro with the loop-invariant latent cache in vLLM 0.26.
+"""S6 correctness-first vLLM 0.26 adapter. Eager TP=PP=1, TRITON_ATTN only.
 
-Replaces vllm/model_executor/models/ouro.py. Each physical layer registers two paged caches: the main latent cache
-(one KV head of `rank` dims for keys and `rank_v` for values, read by all 16 query heads through per-loop absorbed
-query/output maps) and the loop-1 latent cache (`rank1` dims). No per-loop K/V is ever stored: every loop overwrites
-the same slot with the token's current register, and the last loop stores the finalized register. Decode tokens use
-the final-register reader set (A'); prefill tokens use the lockstep set (A). Loop 1 always reads the loop-1 cache.
-
-Activate with hf_overrides={"latent_student": "/path/to/student.pt"}; the checkpoint's cfg fixes the geometry.
-Requires enforce_eager=True (the register state is threaded through Python) and tensor parallel size 1.
+Uses paged terminal latent history with shared S6 attention arithmetic and exact
+current K/V. Public runners fix full-prompt prefill and disable prefix reuse.
+GPU parity/throughput qualification is required before reporting model results.
 """
 
 import math
@@ -84,154 +79,99 @@ class OuroMLP(nn.Module):
 
 
 class OuroLatentAttention(nn.Module):
-    def __init__(self, config: PretrainedConfig, latent_cfg: dict, hidden_size: int, num_heads: int, num_kv_heads: int,
-                 max_position: int = 4096 * 32, cache_config: CacheConfig | None = None, quant_config: QuantizationConfig | None = None,
-                 prefix: str = "", attn_type: str = AttentionType.DECODER) -> None:
+    """Correctness-first S6 paged adapter, eager TP=1, unquantized TRITON_ATTN.
+
+    Attention arithmetic shares the training implementation. This is a reference
+    implementation, not an optimized decode-throughput kernel.
+    """
+    def __init__(self, config, latent_cfg, hidden_size, num_heads, num_kv_heads,
+                 max_position=131072, cache_config=None, quant_config=None,
+                 prefix='', attn_type=AttentionType.DECODER):
         super().__init__()
-        assert get_tensor_model_parallel_world_size() == 1, "latent cache model supports TP=1"
-        self.hidden_size = hidden_size
-        self.num_heads = num_heads; self.num_kv_heads = num_kv_heads
-        self.head_dim = hidden_size // num_heads
-        self.q_size = num_heads * self.head_dim; self.kv_size = num_kv_heads * self.head_dim
-        self.scaling = self.head_dim ** -0.5
-        lc = latent_cfg
-        self.loops = int(lc["loops"]); self.rank = int(lc["rank"]); self.rank_v = int(lc["rank_v"]) or self.rank
-        self.rank1 = int(lc.get("rank1", 0)); self.split = bool(lc.get("split_readers", False)); self.use_finalize = bool(lc.get("finalize", False))
-        self.writer = lc.get("writer", "register")
-        assert lc.get("pos", "latent") == "latent" and self.rank_v == self.rank, "vLLM path: latent RoPE with rank_v == rank"
-        state = self.rank + self.rank_v
-        self.q_proj = ColumnParallelLinear(hidden_size, self.q_size, bias=False, quant_config=quant_config, prefix=f"{prefix}.q_proj")
-        self.o_proj = RowParallelLinear(num_heads * self.head_dim, hidden_size, bias=False, quant_config=quant_config, prefix=f"{prefix}.o_proj")
-        # ---- student (loaded separately, see OuroForCausalLM.load_latent_student)
-        self.cand = nn.Linear(hidden_size, state, bias=False)
-        self.gate = nn.Linear(hidden_size + state, state)
-        if self.use_finalize:
-            self.finalize_mlp = nn.Sequential(nn.Linear(state, state), nn.GELU(), nn.Linear(state, state))
-        self.q_absorb = nn.Parameter(torch.zeros(self.loops, num_heads, self.head_dim, self.rank))
-        self.out_absorb = nn.Parameter(torch.zeros(self.loops, num_heads, self.rank_v, self.head_dim))
-        if self.split:
-            self.q_absorb_d = nn.Parameter(torch.zeros(self.loops, num_heads, self.head_dim, self.rank))
-            self.out_absorb_d = nn.Parameter(torch.zeros(self.loops, num_heads, self.rank_v, self.head_dim))
-        if self.rank1:
-            self.cand1 = nn.Linear(hidden_size, 2 * self.rank1, bias=False)
-            self.q_absorb1 = nn.Parameter(torch.zeros(num_heads, self.head_dim, self.rank1))
-            self.out_absorb1 = nn.Parameter(torch.zeros(num_heads, self.rank1, self.head_dim))
-        theta = float(getattr(config, "rope_theta", 1e6))
-        self.rope_lat = LatentRope(self.rank, self.head_dim, theta, max_position)
-        self.rope_l1 = LatentRope(self.rank1, self.head_dim, theta, max_position) if self.rank1 else None
-        # ---- paged caches: main latent (all loops >= 2) and loop-1 latent
-        base_layer_idx = extract_layer_index(prefix); total_layers = config.num_hidden_layers
-        self.attn_main = Attention(num_heads, self.rank, self.scaling, num_kv_heads=1, cache_config=cache_config, quant_config=quant_config,
-                                   attn_type=attn_type, prefix=f"{prefix}.attn")
-        if self.rank1:
-            p1 = prefix.replace(f"layers.{base_layer_idx}", f"layers.{total_layers + base_layer_idx}")
-            self.attn_l1 = Attention(num_heads, self.rank1, self.scaling, num_kv_heads=1, cache_config=cache_config, quant_config=quant_config,
-                                     attn_type=attn_type, prefix=f"{p1}.attn")
-        self._reg: torch.Tensor | None = None
-        # Experimental manual path is opt-in. Production uses the backend with
-        # metadata geometry patched from each kv_cache_spec.
-        env = os.environ.get("LATENT_MANUAL_PREFILL")
-        self.manual_prefill = env == "1"
-        # Keep the evaluated ordering until the candidate is explicitly adopted.
-        self.finalize_after_read = os.environ.get("LATENT_FINALIZE_AFTER_READ", "0") != "0"
-        self.step: dict = {}   # per-step context set by OuroModel.forward: rope tables, decode mask (no per-call GPU syncs)
-
-    def finalize(self, c: torch.Tensor) -> torch.Tensor:
-        return c + self.finalize_mlp(c) if self.use_finalize else c
-
-
-    def forward(self, positions: torch.Tensor, hidden_states: torch.Tensor, current_ut: int) -> torch.Tensor:
-        T = hidden_states.shape[0]; st = self.step
-        q, _ = self.q_proj(hidden_states); q = q.view(T, self.num_heads, self.head_dim)   # pre-RoPE query
-        h = hidden_states
-        # ---- write the register (lockstep recurrence over loops)
-        u = self.cand(h)
-        prev = torch.zeros_like(u) if (current_ut == 0 or self._reg is None) else self._reg
-        if self.writer == "final":
-            c = u
-        else:
-            g = torch.sigmoid(self.gate(torch.cat([prev, h], -1)))
-            c = (1 - g) * prev + g * u
-        self._reg = c
-        last = current_ut == self.loops - 1
-        if current_ut == 0 and self.rank1:
-            c1 = self.cand1(h); cos1, sin1 = st["l1"]
-            k1 = LatentRope.apply(c1[:, : self.rank1], cos1, sin1); v1 = c1[:, self.rank1:]
-            q1 = LatentRope.apply(torch.einsum("thd,hdr->thr", q, self.q_absorb1), cos1, sin1)
-            o = self.attn_l1(q1.reshape(T, -1), k1, v1).view(T, self.num_heads, self.rank1)
-            o = torch.einsum("thr,hrd->thd", o, self.out_absorb1).reshape(T, -1)
-            if last:  # single-loop models: still store the finalized register
-                self._store_final(c, positions)
-            out, _ = self.o_proj(o)
-            return out
-        # HF reads raw current registers, then finalizes once for future tokens.
-        c_store = self.finalize(c) if last and not self.finalize_after_read else c
-        cos, sin = st["main"]
-        k = LatentRope.apply(c_store[:, : self.rank], cos, sin); v = c_store[:, self.rank:]
-        # query side: decode tokens use the final-register reader set (A'/B'), prefill tokens the lockstep set (A/B);
-        # st["decode"] is True (all decode), False (all prefill) or a per-token bool mask (mixed batch) — decided once per step on the CPU
-        dm = st.get("decode", False) if self.split else False
-        if dm is True:
-            A, Bm = self.q_absorb_d[current_ut], self.out_absorb_d[current_ut]
-        else:
-            A, Bm = self.q_absorb[current_ut], self.out_absorb[current_ut]
-        qc = torch.einsum("thd,hdr->thr", q, A)
-        if isinstance(dm, torch.Tensor):
-            qc = torch.where(dm[:, None, None], torch.einsum("thd,hdr->thr", q, self.q_absorb_d[current_ut]), qc)
-        qc = LatentRope.apply(qc, cos, sin)
-        if st.get("manual"):
-            o = self._manual_attention(self.attn_main, qc, k, v, st)
-        else:
-            o = self.attn_main(qc.reshape(T, -1), k, v).view(T, self.num_heads, self.rank_v)
-        if last and self.finalize_after_read:
-            self._store_final(c, positions)
-        o_out = torch.einsum("thr,hrd->thd", o, Bm)
-        if isinstance(dm, torch.Tensor):
-            o_out = torch.where(dm[:, None, None], torch.einsum("thr,hrd->thd", o, self.out_absorb_d[current_ut]), o_out)
-        out, _ = self.o_proj(o_out.reshape(T, -1))
-        return out
-
-    def _store_final(self, c: torch.Tensor, positions: torch.Tensor) -> None:
-        """Store terminal state after attention, using the backend's cache writer.
-
-        The native helper resolves this layer's cache geometry and slot mapping;
-        it performs no second attention and no guessed virtual-engine indexing.
-        This model path is currently qualified only in eager mode.
-        """
-        if get_forward_context().attn_metadata is None:
-            return  # Profiling has no persistent history to update.
-        c_store = self.finalize(c); cos, sin = self.step["main"]
-        k = LatentRope.apply(c_store[:, : self.rank], cos, sin); v = c_store[:, self.rank:]
-        unified_kv_cache_update(k[:, None], v[:, None], self.attn_main.layer_name)
+        from ouro_depth.latent.register import LatentLayer, ARCHITECTURE
+        if get_tensor_model_parallel_world_size()!=1 or num_heads!=num_kv_heads or quant_config is not None:
+            raise ValueError('S6 reference adapter requires TP=1, MHA and unquantized weights')
+        if latent_cfg.get('architecture')!=ARCHITECTURE:
+            raise ValueError('Only S6 block checkpoints are supported')
+        self.hidden_size,self.num_heads,self.head_dim=hidden_size,num_heads,hidden_size//num_heads
+        self.loops,self.rank,self.rank_v,self.rank1=(int(latent_cfg[k]) for k in ('loops','rank','rank_v','rank1'))
+        if self.rank!=self.rank_v:raise ValueError('vLLM reference requires rank_k == rank_v')
+        self.latent=LatentLayer(hidden_size,num_heads,self.head_dim,self.loops,self.rank,self.rank_v,self.rank1)
+        for name in ('q_proj','k_proj','v_proj'):
+            setattr(self,name,ColumnParallelLinear(hidden_size,hidden_size,bias=False,quant_config=None,prefix=f'{prefix}.{name}'))
+        self.o_proj=RowParallelLinear(hidden_size,hidden_size,bias=False,quant_config=None,prefix=f'{prefix}.o_proj')
+        theta=float(getattr(config,'rope_theta',1e6))
+        self.rope_exact=LatentRope(self.head_dim,self.head_dim,theta,max_position)
+        self.rope_lat=LatentRope(self.rank,self.head_dim,theta,max_position)
+        self.rope_l1=LatentRope(self.rank1,self.head_dim,theta,max_position)
+        index=extract_layer_index(prefix)
+        first_prefix=prefix.replace(f'layers.{index}',f'layers.{config.num_hidden_layers+index}')
+        self.attn_main=Attention(num_heads,self.rank,self.head_dim**-.5,num_kv_heads=1,
+                                cache_config=cache_config,attn_type=attn_type,prefix=f'{prefix}.attn')
+        self.attn_l1=Attention(num_heads,self.rank1,self.head_dim**-.5,num_kv_heads=1,
+                              cache_config=cache_config,attn_type=attn_type,prefix=f'{first_prefix}.attn')
+        for attn in (self.attn_main,self.attn_l1):
+            if attn.impl.__class__.__name__!='TritonAttentionImpl':
+                raise ValueError('Select TRITON_ATTN for the S6 paged reference adapter')
+            if attn.impl.kv_cache_dtype not in ('auto','float16','bfloat16'):
+                raise ValueError('S6 reference adapter does not support quantized caches')
+        self._reg=None
+        self.step={}
 
     @staticmethod
-    def _write_cache(attn, k: torch.Tensor, v: torch.Tensor, md) -> tuple[torch.Tensor, torch.Tensor]:
-        """Write (T, r) keys/values into the layer's paged cache (Triton layout: blocks, kv_heads, block_size, 2r)."""
-        kv_cache = attn.kv_cache[getattr(get_forward_context(), "virtual_engine", 0)]
-        if kv_cache.numel() == 0:            # profiling / dummy run before the cache is allocated
-            return None, None
-        key_cache, value_cache = kv_cache.transpose(1, 2).split(k.shape[-1], dim=-1)
-        triton_reshape_and_cache_flash(k[:, None], v[:, None], key_cache, value_cache, md.slot_mapping[: k.shape[0]], attn.impl.kv_cache_dtype, attn._k_scale, attn._v_scale)
-        return key_cache, value_cache
+    def metadata(attn):
+        metadata=get_forward_context().attn_metadata
+        return metadata[attn.layer_name] if isinstance(metadata,dict) else metadata
 
-    def _manual_attention(self, attn, qc: torch.Tensor, k: torch.Tensor, v: torch.Tensor, st: dict) -> torch.Tensor:
-        """Prefill-step attention in torch over the paged cache: causal within each request, full history for decode requests."""
-        md = st["md"]; key_cache, value_cache = self._write_cache(attn, k, v, md)
-        if key_cache is None:
-            return torch.zeros_like(qc)
-        bs = key_cache.shape[1]; r = k.shape[-1]; out = torch.zeros_like(qc); qsl, sl = st["qsl"], st["sl"]
-        for i in range(len(sl)):
-            s, e, L = qsl[i], qsl[i + 1], sl[i]
-            if e <= s:
-                continue
-            rows = md.block_table[i, : (L + bs - 1) // bs]
-            K = key_cache[rows].reshape(-1, r)[:L]; V = value_cache[rows].reshape(-1, r)[:L]
-            q = qc[s:e].transpose(0, 1)                                                     # (H, ql, r)
-            att = torch.matmul(q.float(), K.float().T) * self.scaling                       # (H, ql, L)
-            ql = e - s; qi = torch.arange(ql, device=qc.device)[:, None]; kj = torch.arange(L, device=qc.device)[None, :]
-            att = att.masked_fill(kj > (L - ql) + qi, float("-inf"))
-            out[s:e] = torch.matmul(torch.softmax(att, -1).to(V.dtype), V).transpose(0, 1)
-        return out
+    def forward(self,positions,hidden_states,current_ut):
+        from ouro_depth.latent.batched_engine import mixed_attention
+        from ouro_depth.vllm_latent.cache_view import paged_prefix
+        h=hidden_states;sl=self.latent;n=h.shape[0]
+        self._reg=sl.write_step(h,current_ut,None if current_ut==0 else self._reg)
+        if current_ut==0:self._first=sl.write1(h)
+        projections=[getattr(self,name)(h)[0].view(n,self.num_heads,self.head_dim)
+                     for name in ('q_proj','k_proj','v_proj')]
+        cos,sin=self.step['exact']
+        output=h.new_zeros(n,self.num_heads,self.head_dim)
+        md=self.metadata(self.attn_main)
+        if md is None:
+            requests=[(0,n,0)]  # profiling: no persistent history
+        else:
+            requests=self.step['requests']
+        for request,(start,end,prefix_len) in enumerate(requests):
+            if end<=start:continue
+            # Public runner disables scheduler chunking and prefix reuse.
+            if prefix_len and end-start!=1:
+                raise ValueError('S6 reference serving supports full prompt + one-token decode only')
+            blocks,masks=(),()
+            if prefix_len:
+                attn=self.attn_l1 if current_ut==0 else self.attn_main
+                metadata=self.metadata(attn)
+                cache=attn.kv_cache
+                if isinstance(cache,(tuple,list)):cache=cache[getattr(get_forward_context(),'virtual_engine',0)]
+                width=self.rank1 if current_ut==0 else self.rank
+                active=paged_prefix(cache,metadata.block_table[request],prefix_len,width)
+                zeros=active.new_zeros(prefix_len,self.rank+self.rank_v if current_ut==0 else 2*self.rank1)
+                packed=torch.cat((zeros,active),-1) if current_ut==0 else torch.cat((active,zeros),-1)
+                blocks=(packed[None],);masks=(torch.ones(1,prefix_len,device=h.device,dtype=torch.bool),)
+            q,k,v=(x[start:end].transpose(0,1)[None] for x in projections)
+            result=mixed_attention(sl,current_ut,q,k,v,cos[start:end,0][None],sin[start:end,0][None],
+                                   torch.ones(1,end-start,device=h.device,dtype=torch.bool),blocks,masks)
+            output[start:end]=result[0].transpose(0,1)
+        # Current exact K/V are transient. Persist only complete latent writes.
+        if md is not None:
+            actual=int(md.num_actual_tokens)
+            if current_ut==0:
+                c,s=self.step['l1'];row=self._first
+                key=LatentRope.apply(row[:,:self.rank1],c,s)
+                unified_kv_cache_update(key[:actual,None],row[:actual,None,self.rank1:],self.attn_l1.layer_name)
+            if current_ut==self.loops-1:
+                c,s=self.step['main'];row=self._reg
+                key=LatentRope.apply(row[:,:self.rank],c,s)
+                unified_kv_cache_update(key[:actual,None],row[:actual,None,self.rank:],self.attn_main.layer_name)
+        result,_=self.o_proj(output.reshape(n,-1))
+        if current_ut==self.loops-1:self._reg=None;self._first=None
+        return result
 
 
 class OuroDecoderLayer(nn.Module):
@@ -267,11 +207,23 @@ class OuroModel(nn.Module):
         super().__init__()
         config = vllm_config.model_config.hf_config
         cache_config = vllm_config.cache_config; quant_config = vllm_config.quant_config
+        if not vllm_config.model_config.enforce_eager:
+            raise ValueError('S6 reference adapter requires enforce_eager=True')
+        if vllm_config.parallel_config.pipeline_parallel_size != 1:
+            raise ValueError('S6 reference adapter requires PP=1')
+        if cache_config.enable_prefix_caching or vllm_config.scheduler_config.enable_chunked_prefill:
+            raise ValueError('Disable prefix caching and scheduler chunked prefill for S6 reference serving')
         self.config = config; self.quant_config = quant_config; self.vocab_size = config.vocab_size
         student_path = getattr(config, "latent_student", None)
         assert student_path, "set hf_overrides={'latent_student': path}"
-        ck = torch.load(student_path, map_location="cpu")
+        ck = torch.load(student_path, map_location="cpu", weights_only=False)
         self.latent_cfg = ck["cfg"]; self._student_state = ck["student"]
+        from ouro_depth.vllm_latent.cache_view import validate_geometry
+        validate_geometry(config, self.latent_cfg)
+        from ouro_depth.latent.register import LatentStudent
+        # Validate the full state, including unexpected layers/parameters.
+        checked = LatentStudent.from_checkpoint(ck)
+        del checked
         self.embed_tokens = VocabParallelEmbedding(config.vocab_size, config.hidden_size, quant_config=quant_config, prefix=f"{prefix}.embed_tokens")
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
@@ -282,15 +234,14 @@ class OuroModel(nn.Module):
         self.early_exit_gate = RowParallelLinear(config.hidden_size, 1, bias=True)
         self.total_ut_steps = int(self.latent_cfg["loops"])
 
-    def load_latent_student(self) -> int:
-        n = 0
-        for i, layer in enumerate(self.layers):
-            attn = layer.self_attn
-            sd = {k[len(f"layers.{i}."):]: v for k, v in self._student_state.items() if k.startswith(f"layers.{i}.")}
-            missing, unexpected = attn.load_state_dict(sd, strict=False)
-            n += len(sd)
-            bad = [m for m in missing if not (m.startswith("q_proj") or m.startswith("o_proj") or m.startswith("attn") or m.startswith("rope"))]
-            assert not bad and not unexpected, (bad, unexpected)
+    def load_latent_student(self):
+        n=0
+        for i,layer in enumerate(self.layers):
+            prefix=f'layers.{i}.'
+            sd={k[len(prefix):]:v for k,v in self._student_state.items() if k.startswith(prefix)}
+            layer.self_attn.latent.load_state_dict(sd,strict=True)
+            n+=len(sd)
+        del self._student_state
         return n
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
@@ -300,7 +251,7 @@ class OuroModel(nn.Module):
         stacked = [("gate_up_proj", "gate_proj", 0), ("gate_up_proj", "up_proj", 1)]
         params = dict(self.named_parameters()); loaded: set[str] = set()
         for name, w in weights:
-            if "rotary_emb.inv_freq" in name or ".k_proj." in name or ".v_proj." in name:
+            if "rotary_emb.inv_freq" in name:
                 continue
             for pname, wname, shard in stacked:
                 if wname in name:
@@ -313,28 +264,15 @@ class OuroModel(nn.Module):
                     getattr(params[name], "weight_loader", default_weight_loader)(params[name], w); loaded.add(name)
         return loaded
 
-    def _step_context(self, positions: torch.Tensor, T: int, dtype: torch.dtype) -> dict:
-        a0 = self.layers[0].self_attn
-        st = {"main": a0.rope_lat.tables(positions, dtype)}
-        if a0.rope_l1 is not None:
-            st["l1"] = a0.rope_l1.tables(positions, dtype)
-        md = get_forward_context().attn_metadata
-        if isinstance(md, dict):
-            md = md.get(a0.attn_main.layer_name) or next(iter(md.values()), None)
-        st["manual"] = False
-        if md is None:                       # profiling / dummy run: lockstep readers
-            st["decode"] = False
-        elif int(md.max_query_len) == 1:     # pure decode step (the common case): final-register readers, no mask
-            st["decode"] = True
-        else:                                # prefill or mixed: per-token mask built without a host sync
-            if a0.manual_prefill:            # Triton@512: this step's main-cache attention runs in torch (one host sync per prefill step)
-                st["manual"] = True; st["md"] = md; st["qsl"] = md.query_start_loc.tolist(); st["sl"] = md.seq_lens.tolist()
-            qsl = md.query_start_loc[: md.num_reqs + 1] if hasattr(md, "num_reqs") else md.query_start_loc
-            qlen = qsl[1:] - qsl[:-1]
-            mask = torch.repeat_interleave(qlen == 1, qlen, output_size=int(md.num_actual_tokens))
-            if mask.numel() < T:
-                mask = torch.cat([mask, torch.zeros(T - mask.numel(), dtype=torch.bool, device=mask.device)])
-            st["decode"] = mask[:T]
+    def _step_context(self,positions,T,dtype):
+        a=self.layers[0].self_attn
+        st=dict(main=a.rope_lat.tables(positions,dtype),l1=a.rope_l1.tables(positions,dtype),
+                exact=a.rope_exact.tables(positions,dtype))
+        md=a.metadata(a.attn_main)
+        if md is not None:
+            starts=md.query_start_loc.tolist();lengths=md.seq_lens.tolist()
+            st['requests']=[(starts[i],starts[i+1],int(length)-(starts[i+1]-starts[i]))
+                            for i,length in enumerate(lengths)]
         return st
 
     def forward(self, input_ids, positions, intermediate_tensors=None, inputs_embeds=None):
@@ -375,7 +313,7 @@ class OuroForCausalLM(nn.Module, SupportsLoRA):
         return self.logits_processor(self.lm_head, hidden_states)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        student_keys = ("cand", "gate", "finalize_mlp", "cand1", "q_absorb", "out_absorb", "rope_lat", "rope_l1", "early_exit_gate")
+        student_keys = ("latent.", "early_exit_gate")
         loader = AutoWeightsLoader(self, skip_prefixes=(["lm_head."] if self.config.tie_word_embeddings else None))
         loaded = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
         n = self.model.load_latent_student()

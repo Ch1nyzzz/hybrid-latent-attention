@@ -1,162 +1,118 @@
-"""Loop-invariant latent cache for Ouro: per-layer recurrent memory register + loop-specific readers.
+"""S6 terminal block writer and direct latent-RoPE readers.
 
-Per layer l and history token j the persistent state is a register ``c_j = [c_j^K ; c_j^V]`` (``rank`` + ``rank_v`` dims;
-``rank_v = 0`` means K and V share ``c_j^K``, MLA-style) written by a gated update over the token's own loop trajectory.
-Two positional schemes for the K side:
-  pos="decoupled": content score on the un-rotated latent plus a small RoPE branch ``k_j^R = P_R(c_j^K)`` of ``d_rope`` dims
-                   (MLA layout; cache = rank + rank_v + d_rope).
-  pos="latent":    the whole K latent is rotated by RoPE with the teacher's frequencies assigned round-robin to latent pairs,
-                   so every content dimension carries relative position (cache = rank + rank_v).
-Loop-specific computation lives on the query/output side only (``A_t``, ``Q_t^R``, ``B_t``): any reader depth attends to
-the cached latent directly, with no per-loop K/V reconstruction.
+A cache row is [rotated main K, main V, rotated loop-one K, loop-one V].
+No per-loop history, finalizer, gate, or K/V reconstruction is stored.
 """
 from __future__ import annotations
-
 import math
-
 import torch
 from torch import Tensor, nn
 
-
-def rotate_half(x: Tensor) -> Tensor:
-    x1, x2 = x.chunk(2, dim=-1)
-    return torch.cat((-x2, x1), dim=-1)
+ARCHITECTURE = 's6-block-v1'
 
 
-def apply_rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
-    """x: (B, H, L, D); cos/sin: (B, L, D)."""
+def rotate_half(x):
+    a, b = x.chunk(2, -1)
+    return torch.cat((-b, a), -1)
+
+
+def apply_rope(x, cos, sin):
     return x * cos.unsqueeze(1) + rotate_half(x) * sin.unsqueeze(1)
 
 
-def rope_subset(cos: Tensor, sin: Tensor, d: int) -> tuple[Tensor, Tensor]:
-    """d/2 frequencies spread across the head's frequencies (small decoupled branch)."""
-    n_freq = cos.shape[-1] // 2
-    idx = torch.linspace(0, n_freq - 1, d // 2, device=cos.device).round().long()
-    return torch.cat([cos[..., idx], cos[..., idx]], -1), torch.cat([sin[..., idx], sin[..., idx]], -1)
-
-
-def rope_latent(cos: Tensor, sin: Tensor, d: int) -> tuple[Tensor, Tensor]:
-    """All teacher frequencies assigned round-robin to the d/2 latent pairs (frequency-aligned latent RoPE)."""
-    n_freq = cos.shape[-1] // 2
-    idx = torch.arange(d // 2, device=cos.device) % n_freq
-    return torch.cat([cos[..., idx], cos[..., idx]], -1), torch.cat([sin[..., idx], sin[..., idx]], -1)
+def rope_latent(cos, sin, width):
+    idx = torch.arange(width // 2, device=cos.device) % (cos.shape[-1] // 2)
+    return torch.cat((cos[..., idx], cos[..., idx]), -1), torch.cat((sin[..., idx], sin[..., idx]), -1)
 
 
 class LatentLayer(nn.Module):
-    """Writer (shared over loops) + per-loop readers for one decoder layer."""
-
-    def __init__(self, hidden: int, heads: int, head_dim: int, loops: int, rank: int, d_rope: int, writer: str = "register",
-                 rank_v: int = 0, pos: str = "decoupled", finalize: bool = False, rank1: int = 0, split_readers: bool = False):
+    def __init__(self, hidden, heads, head_dim, loops, rank, rank_v, rank1):
         super().__init__()
-        assert pos in ("decoupled", "latent") and (pos == "decoupled" or rank % 2 == 0)
-        self.hidden, self.heads, self.head_dim, self.loops, self.rank, self.d_rope, self.writer = hidden, heads, head_dim, loops, rank, d_rope, writer
-        self.rank_v, self.pos, self.use_finalize, self.rank1, self.split_readers = rank_v, pos, finalize, rank1, split_readers
-        state = rank + rank_v
-        if split_readers:  # second reader set for FINAL (cached) registers; the first set reads in-progress (lockstep / self) registers
-            assert pos == "latent"
-            self.q_absorb_d = nn.Parameter(torch.empty(loops, heads, head_dim, rank)); nn.init.normal_(self.q_absorb_d, std=1.0 / math.sqrt(head_dim))
-            self.out_absorb_d = nn.Parameter(torch.zeros(loops, heads, rank_v or rank, head_dim))
-        if rank1:  # dedicated loop-1 latent [c1^K ; c1^V] (2*rank1), a fixed linear function of the loop-1 input; loop-1 readers use it
-            assert pos == "latent" and rank1 % 2 == 0
-            self.cand1 = nn.Linear(hidden, 2 * rank1, bias=False)
-            self.q_absorb1 = nn.Parameter(torch.empty(heads, head_dim, rank1)); nn.init.normal_(self.q_absorb1, std=1.0 / math.sqrt(head_dim))
-            self.out_absorb1 = nn.Parameter(torch.zeros(heads, rank1, head_dim))
-        if finalize:  # exit transform Phi(c) = c + MLP(c), identity at init; applied once when a token stops looping
-            self.finalize_mlp = nn.Sequential(nn.Linear(state, state), nn.GELU(), nn.Linear(state, state))
-            nn.init.zeros_(self.finalize_mlp[2].weight); nn.init.zeros_(self.finalize_mlp[2].bias)
-        self.cand = nn.Linear(hidden, state, bias=False)                 # G(h_t)
-        self.gate = nn.Linear(hidden + state, state)                     # sigma(W_g [c ; h_t])
-        self.q_absorb = nn.Parameter(torch.empty(loops, heads, head_dim, rank))   # A_t per head: head_dim -> rank
-        rv = rank_v or rank
-        self.out_absorb = nn.Parameter(torch.zeros(loops, heads, rv, head_dim))  # B_t per head: rank_v -> head_dim (zero init)
-        if pos == "decoupled":
-            self.rope_key = nn.Linear(rank, d_rope, bias=False)         # P_R(c^K)
-            self.q_rope = nn.ModuleList(nn.Linear(hidden, heads * d_rope, bias=False) for _ in range(loops))  # Q_t^R
-        nn.init.normal_(self.q_absorb, std=1.0 / math.sqrt(head_dim))
-        nn.init.constant_(self.gate.bias, 1.0)  # start by mostly overwriting with the newest loop
+        if loops < 2 or min(rank, rank_v, rank1) < 1 or rank % 2 or rank1 % 2:
+            raise ValueError('S6 requires T>=2, positive K/V/rank1 and even K ranks')
+        self.hidden, self.heads, self.head_dim = hidden, heads, head_dim
+        self.loops, self.rank, self.rank_v, self.rank1 = loops, rank, rank_v, rank1
+        # Index 0 is E_2. E_1 is structurally absent, not merely zero-initialized.
+        self.cand_s = nn.ModuleList(nn.Linear(hidden, rank + rank_v, bias=False) for _ in range(loops - 1))
+        self.cand1 = nn.Linear(hidden, 2 * rank1, bias=False)
+        self.q_absorb = nn.Parameter(torch.empty(loops - 1, heads, head_dim, rank))
+        self.out_absorb = nn.Parameter(torch.empty(loops - 1, heads, rank_v, head_dim))
+        self.q_absorb1 = nn.Parameter(torch.empty(heads, head_dim, rank1))
+        self.out_absorb1 = nn.Parameter(torch.empty(heads, rank1, head_dim))
+        for p in (self.q_absorb, self.out_absorb, self.q_absorb1, self.out_absorb1):
+            nn.init.normal_(p, std=1 / math.sqrt(hidden))
 
-    # ---- writer -------------------------------------------------------------------------------------------
-    def write(self, h_loops: list[Tensor]) -> Tensor:
-        """h_loops[t]: (B, L, hidden) attention input at loop t+1. Returns stacked registers (T, B, L, rank+rank_v)."""
-        regs: list[Tensor] = []
-        for h in h_loops:
-            u = self.cand(h)
-            if self.writer == "final":          # ablation B: c = G(h_tau), no accumulation
-                c = u
-            elif self.writer == "first":        # ablation A: c = G(h_1), frozen after loop 1
-                c = regs[0] if regs else u
-            else:                               # main: gated accumulating register
-                prev = regs[-1] if regs else torch.zeros_like(u)
-                g = torch.sigmoid(self.gate(torch.cat([prev, h], -1)))
-                c = (1 - g) * prev + g * u
-            regs.append(c)
-        return torch.stack(regs)
+    def write_step(self, h, loop, previous=None):
+        if loop == 0:
+            return h.new_zeros(*h.shape[:-1], self.rank + self.rank_v)
+        update = self.cand_s[loop - 1](h)
+        return update if previous is None else previous + update
 
-    def write1(self, h1: Tensor) -> Tensor:
-        """Loop-1 latent (B, L, 2*rank1) from the loop-1 attention input."""
-        return self.cand1(h1)
+    def write(self, h_loops):
+        if len(h_loops) != self.loops:
+            raise ValueError('Writer requires the complete fixed-depth trajectory')
+        reg, rows = None, []
+        for loop, h in enumerate(h_loops):
+            reg = self.write_step(h, loop, reg)
+            rows.append(reg)
+        return torch.stack(rows)
 
-    def finalize(self, c: Tensor) -> Tensor:
-        """Register as stored in the cache after the token exits (read by readers at other depths)."""
-        return c + self.finalize_mlp(c) if self.use_finalize else c
+    def write1(self, h):
+        return self.cand1(h)
 
-    # ---- readers -------------------------------------------------------------------------------------------
-    def scores(self, t: int, q: Tensor, h: Tensor, c_read: Tensor, cos: Tensor, sin: Tensor,
-               cos_q: Tensor | None = None, sin_q: Tensor | None = None, final: bool = False) -> Tensor:
-        """Attention logits (B, H, Lq, Lk) of reader loop t.
+    def readers(self, loop):
+        if loop == 0:
+            return self.q_absorb1, self.out_absorb1, self.rank1
+        return self.q_absorb[loop - 1], self.out_absorb[loop - 1], self.rank
 
-        q: teacher's PRE-RoPE query (B, H, Lq, head_dim) from the frozen q_proj; h: (B, Lq, hidden);
-        c_read: (B, Lk, rank+rank_v) registers seen by this reader; cos/sin: RoPE tables of the KEY positions (B, Lk, head_dim);
-        cos_q/sin_q: RoPE tables of the query positions (default: same as the keys, i.e. Lq == Lk aligned);
-        final: the keys are cached final registers (decode reader set) rather than in-progress ones.
-        """
-        if cos_q is None:
-            cos_q, sin_q = cos, sin
-        A = self.q_absorb_d if (final and self.split_readers) else self.q_absorb
-        if t == 0 and self.rank1:  # loop-1 reader on the dedicated loop-1 latent
-            ck = c_read[..., : self.rank1]
-            qc = torch.einsum("bhid,hdr->bhir", q, self.q_absorb1)
-            cosL, sinL = rope_latent(cos, sin, self.rank1); cosQ, sinQ = rope_latent(cos_q, sin_q, self.rank1)
-            qc = apply_rope(qc, cosQ, sinQ); ck = ck * cosL + rotate_half(ck) * sinL
-            return torch.einsum("bhir,bjr->bhij", qc, ck) / math.sqrt(self.head_dim)
-        ck = c_read[..., : self.rank]
-        qc = torch.einsum("bhid,hdr->bhir", q, A[t])                                     # absorbed (NoPE) query
-        if self.pos == "latent":
-            cosL, sinL = rope_latent(cos, sin, self.rank)
-            cosQ, sinQ = rope_latent(cos_q, sin_q, self.rank)
-            qc = apply_rope(qc, cosQ, sinQ)
-            ck = ck * cosL + rotate_half(ck) * sinL
-            return torch.einsum("bhir,bjr->bhij", qc, ck) / math.sqrt(self.head_dim)
-        cos64, sin64 = rope_subset(cos, sin, self.d_rope)
-        cos64q, sin64q = rope_subset(cos_q, sin_q, self.d_rope)
-        kr = self.rope_key(ck)
-        kr = kr * cos64 + rotate_half(kr) * sin64
-        qr = self.q_rope[t](h).view(*h.shape[:2], self.heads, self.d_rope).transpose(1, 2)
-        qr = apply_rope(qr, cos64q, sin64q)
-        return (torch.einsum("bhir,bjr->bhij", qc, ck) / math.sqrt(self.head_dim)
-                + torch.einsum("bhid,bjd->bhij", qr, kr) / math.sqrt(self.d_rope))
+    def query(self, loop, q, cos, sin):
+        A, _, rank = self.readers(loop)
+        c, s = rope_latent(cos, sin, rank)
+        return apply_rope(torch.einsum('bhid,hdr->bhir', q, A), c, s)
 
-    def read_out(self, t: int, probs: Tensor, c_read: Tensor, final: bool = False) -> Tensor:
-        """probs (B, H, L, L), c_read (B, L, rank+rank_v) -> per-head outputs (B, L, H*head_dim) before the frozen o_proj."""
-        if t == 0 and self.rank1:
-            z = torch.einsum("bhij,bjr->bhir", probs, c_read[..., self.rank1: 2 * self.rank1])
-            o = torch.einsum("bhir,hrd->bhid", z, self.out_absorb1)
-            return o.transpose(1, 2).reshape(probs.shape[0], probs.shape[2], -1)
-        Bm = self.out_absorb_d if (final and self.split_readers) else self.out_absorb
-        cv = c_read[..., self.rank:] if self.rank_v else c_read[..., : self.rank]
-        z = torch.einsum("bhij,bjr->bhir", probs, cv)
-        o = torch.einsum("bhir,hrd->bhid", z, Bm[t])
-        return o.transpose(1, 2).reshape(probs.shape[0], probs.shape[2], -1)
+    def pack(self, reg, first, cos, sin):
+        c, s = rope_latent(cos, sin, self.rank)
+        c1, s1 = rope_latent(cos, sin, self.rank1)
+        return torch.cat((reg[..., :self.rank] * c + rotate_half(reg[..., :self.rank]) * s,
+                          reg[..., self.rank:],
+                          first[..., :self.rank1] * c1 + rotate_half(first[..., :self.rank1]) * s1,
+                          first[..., self.rank1:]), -1)
+
+    def fields(self, loop, packed):
+        if loop == 0:
+            row = packed[..., self.rank + self.rank_v:]
+            return row[..., :self.rank1], row[..., self.rank1:]
+        return packed[..., :self.rank], packed[..., self.rank:self.rank + self.rank_v]
+
+    def scores(self, loop, q, packed, cos, sin):
+        key, _ = self.fields(loop, packed)
+        return torch.einsum('bhir,bjr->bhij', self.query(loop, q, cos, sin), key) / math.sqrt(self.head_dim)
+
+    def read_out(self, loop, probabilities, packed):
+        _, value = self.fields(loop, packed)
+        _, B, _ = self.readers(loop)
+        z = torch.einsum('bhij,bjr->bhir', probabilities, value)
+        return torch.einsum('bhir,hrd->bhid', z, B)
 
 
 class LatentStudent(nn.Module):
-    def __init__(self, num_layers: int, hidden: int, heads: int, head_dim: int, loops: int, rank: int, d_rope: int,
-                 writer: str = "register", rank_v: int = 0, pos: str = "decoupled", finalize: bool = False, rank1: int = 0, split_readers: bool = False):
+    def __init__(self, num_layers, hidden, heads, head_dim, loops=4, rank=512,
+                 rank_v=512, rank1=256, architecture=ARCHITECTURE):
         super().__init__()
-        self.layers = nn.ModuleList(LatentLayer(hidden, heads, head_dim, loops, rank, d_rope, writer, rank_v, pos, finalize, rank1, split_readers) for _ in range(num_layers))
-        self.cfg = dict(num_layers=num_layers, hidden=hidden, heads=heads, head_dim=head_dim, loops=loops, rank=rank, d_rope=d_rope,
-                        writer=writer, rank_v=rank_v, pos=pos, finalize=finalize, rank1=rank1, split_readers=split_readers)
+        if architecture != ARCHITECTURE:
+            raise ValueError('Only S6 block checkpoints are supported')
+        self.cfg = dict(num_layers=num_layers, hidden=hidden, heads=heads, head_dim=head_dim,
+                        loops=loops, rank=rank, rank_v=rank_v, rank1=rank1, architecture=architecture)
+        self.layers = nn.ModuleList(LatentLayer(hidden, heads, head_dim, loops, rank, rank_v, rank1)
+                                   for _ in range(num_layers))
 
-    def cache_bytes_per_token(self, dtype_bytes: int = 2) -> int:
-        c = self.cfg
-        return c["num_layers"] * (c["rank"] + c["rank_v"] + 2 * c["rank1"] + (c["d_rope"] if c["pos"] == "decoupled" else 0)) * dtype_bytes
+    def cache_bytes_per_token(self, dtype_bytes=2):
+        return self.cfg['num_layers'] * (self.cfg['rank'] + self.cfg['rank_v'] + 2*self.cfg['rank1']) * dtype_bytes
+
+    @classmethod
+    def from_checkpoint(cls, checkpoint, device='cpu'):
+        student = cls(**checkpoint['cfg']).to(device)
+        student.load_state_dict(checkpoint['student'], strict=True)
+        if any(not torch.isfinite(p).all() for p in student.parameters()):
+            raise ValueError('Nonfinite student checkpoint')
+        return student

@@ -56,7 +56,7 @@ def _decode_scope(position: int) -> str:
 
 @torch.no_grad()
 def evaluate(model, student, teacher_targets_fn: Callable,
-             examples: Sequence[tuple[Tensor, int]], eos_ids=(0, 2)) -> dict:
+             examples: Sequence[tuple[Tensor, int]], eos_ids=(0, 2), prompt_chunk_size=256) -> dict:
     """Evaluate variable-length, unpadded ``([1,L] ids, prompt_length)`` pairs.
 
     ``teacher_targets_fn(ids[:, :-1])`` must return teacher logits [1,L-1,V]
@@ -95,7 +95,7 @@ def evaluate(model, student, teacher_targets_fn: Callable,
                 sums = torch.zeros(len(SCOPES), len(METRICS), device=ids.device, dtype=torch.float64)
             elif sums.device != ids.device:
                 raise ValueError('all evaluation examples must share a device')
-            engine = RollingEngine(model, student, checkpointing=False, self_final=True)
+            engine = RollingEngine(model, student, checkpointing=False, prompt_chunk_size=prompt_chunk_size)
             prefill_logits, aux = engine.prefill(ids[:, :prompt_length])
             del aux
             if prefill_logits.shape != (1, prompt_length, teacher_logits.shape[-1]):
