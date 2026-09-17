@@ -1,75 +1,123 @@
-"""Execute production vLLM attention methods with CPU paged-cache substitutes.
-
-This verifies arithmetic/order, not vLLM runtime or GPU kernel compatibility.
-"""
-import ast
-from copy import deepcopy
-from pathlib import Path
-from types import SimpleNamespace
+"""``s6_layer`` against the training oracle on the tiny real Ouro: vLLM-style metadata
+(padded requests/tokens, non-identity block tables with stale columns), paged caches for both
+groups with one shared block size, four loops with writer commits. CPU fp32; arithmetic only."""
+import math
 import torch
-from torch import nn
 from ouro_depth.tests.test_s6_engine import fixture
 from ouro_depth.latent.register import apply_rope
+from ouro_depth.latent.batched_engine import mixed_attention
+from ouro_depth.vllm_latent import s6_layer
+from ouro_depth.vllm_latent.s6_ops import TORCH_BACKENDS
+
+BLOCK, NUM_BLOCKS, MAX_BLOCKS = 4, 24, 6
+I32 = torch.int32
 
 
-class TupleLinear(nn.Linear):
-    def forward(self,x):return super().forward(x),None
+class Sim:
+    """Paged caches plus the oracle's per-request packed history; block ids are shuffled, never 0."""
+
+    def __init__(self, model, sl):
+        self.attn, self.rotary, self.sl = model.model.layers[0].self_attn, model.model.rotary_emb, sl
+        self.widths = {'main': sl.rank, 'l1': sl.rank1}
+        self.caches = {name: torch.full((NUM_BLOCKS, 1, BLOCK, 2 * w), float('nan')) for name, w in self.widths.items()}
+        inv_freq = s6_layer.latent_inv_freq(sl.head_dim, model.config.rope_theta)
+        torch.testing.assert_close(inv_freq, self.rotary.inv_freq)
+        self.tables = {w: s6_layer.latent_rope_table(model.config.max_position_embeddings, inv_freq, w, torch.float32) for w in self.widths.values()}
+        self.free = (torch.randperm(NUM_BLOCKS - 1) + 1).tolist()
+        self.blocks, self.history = {}, {}
+
+    def rows(self, name, rid, length):
+        return self.caches[name][torch.tensor(self.blocks[rid]), 0].reshape(-1, 2 * self.widths[name])[:length]
+
+    def run_step(self, requests, padded_requests=0, padding_tokens=0):
+        sl, width = self.sl, {0: self.sl.rank1, self.sl.loops - 1: self.sl.rank}
+        lengths = [(rid, n, self.history[rid].shape[0] if rid in self.history else 0) for rid, n in requests]
+        real = sum(n for _, n, _ in lengths)
+        T, num_reqs = real + padding_tokens, len(requests) + padded_requests
+        starts = [0] + torch.tensor([n for _, n, _ in lengths]).cumsum(0).tolist()
+        qsl = torch.tensor(starts + [real] * padded_requests, dtype=I32)
+        seq_lens = torch.tensor([c + n for _, n, c in lengths] + [0] * padded_requests, dtype=I32)
+        positions = torch.cat([torch.arange(c, c + n) for _, n, c in lengths] + [torch.ones(padding_tokens, dtype=torch.long)])
+        table = torch.randint(1, NUM_BLOCKS, (num_reqs, MAX_BLOCKS), dtype=I32)  # stale columns stay garbage
+        table[len(requests):] = 0
+        for r, (rid, n, c) in enumerate(lengths):
+            blocks = self.blocks.setdefault(rid, [])
+            while len(blocks) * BLOCK < c + n:
+                blocks.append(self.free.pop())
+            table[r, :len(blocks)] = torch.tensor(blocks, dtype=I32)
+        ctx = s6_layer.StepContext(positions, qsl, seq_lens, max(n for _, n, _ in lengths), T, self.tables,
+                                   1 / math.sqrt(sl.head_dim), TORCH_BACKENDS)
+        expected_ctx = sum([[c] * n for _, n, c in lengths], []) + [0] * padding_tokens
+        assert ctx.ctx.tolist() == expected_ctx and ctx.valid.tolist() == [True] * real + [False] * padding_tokens
+        assert torch.equal(ctx.invalid, ~ctx.valid) and torch.equal(ctx.empty, ctx.ctx == 0)
+        cos, sin = self.rotary(torch.zeros(1, T, sl.hidden), positions[None])
+        slots = table[ctx.token_requests, positions // BLOCK] * BLOCK + positions % BLOCK
+        state, trajectory, events = None, [], []
+        for loop in range(sl.loops):
+            h = torch.randn(T, sl.hidden)
+            trajectory.append(h)
+            state = s6_layer.write_rows(sl, loop, h, state)
+            q, k, v = (getattr(self.attn, name)(h).view(T, sl.heads, sl.head_dim) for name in ('q_proj', 'k_proj', 'v_proj'))
+            q_lat = ctx.latent_query(sl, loop, q)
+            q_rope, k_rope = (apply_rope(x.transpose(0, 1)[None], cos, sin)[0].transpose(0, 1) for x in (q, k))
+            name = 'l1' if loop == 0 else 'main'
+            out = s6_layer.attend(sl, loop, q_lat, q_rope, k_rope, v, self.caches[name], table, None, None, ctx)
+            assert out.shape == (T, sl.heads, sl.head_dim) and (out[~ctx.valid] == 0).all()
+            for r, (rid, n, c) in enumerate(lengths):
+                s, e = starts[r], starts[r] + n
+                blocks, masks = ((self.history[rid][None],), (torch.ones(1, c, dtype=torch.bool),)) if c else ((), ())
+                qq, kk, vv = (x[s:e].transpose(0, 1)[None] for x in (q, k, v))
+                oracle = mixed_attention(sl, loop, qq, kk, vv, cos[:, s:e], sin[:, s:e],
+                                         torch.ones(1, n, dtype=torch.bool), blocks, masks)
+                torch.testing.assert_close(out[s:e], oracle[0].transpose(0, 1), rtol=2e-5, atol=2e-7)
+            row = s6_layer.committed_row(sl, loop, state, ctx)
+            if row is not None:
+                key, value = row
+                assert loop in width and key.shape == value.shape == (T, width[loop])
+                events.append((name, torch.cat((key, value), -1)))
+                self.caches[name].view(-1, 2 * width[loop])[slots[ctx.valid]] = events[-1][1][ctx.valid]
+        assert [name for name, _ in events] == ['l1', 'main']
+        packed = sl.pack(sl.write([h[None] for h in trajectory])[-1], sl.write1(trajectory[0][None]), cos, sin)[0]
+        for (name, row), loop in zip(events, (0, sl.loops - 1)):
+            torch.testing.assert_close(row, torch.cat(sl.fields(loop, packed), -1), rtol=0, atol=0)
+        for r, (rid, n, c) in enumerate(lengths):
+            s = starts[r]
+            self.history[rid] = torch.cat((self.history[rid], packed[s:s + n])) if c else packed[s:s + n]
+            main, l1 = self.history[rid].split([2 * sl.rank, 2 * sl.rank1], -1)
+            torch.testing.assert_close(self.rows('main', rid, c + n), main, rtol=0, atol=0)
+            torch.testing.assert_close(self.rows('l1', rid, c + n), l1, rtol=0, atol=0)
+        return ctx
 
 
-def test_actual_adapter_full_prompt_decode_and_terminal_writes():
-    model,student,teacher,ids=fixture()
-    source=Path(__file__).parents[1]/'vllm_latent/ouro_latent.py'
-    selected=[]
-    for node in ast.parse(source.read_text()).body:
-        if isinstance(node,ast.FunctionDef) and node.name=='rotate_half':selected.append(node)
-        if isinstance(node,ast.ClassDef) and node.name=='LatentRope':selected.append(node)
-        if isinstance(node,ast.ClassDef) and node.name=='OuroLatentAttention':
-            node.body=[n for n in node.body if isinstance(n,ast.FunctionDef) and n.name in ('forward','metadata')]
-            selected.append(node)
-    context=SimpleNamespace(attn_metadata={},virtual_engine=0)
-    caches={name:SimpleNamespace(layer_name=name,kv_cache=torch.zeros(2,1,4,16)) for name in ('main','l1')}
-    events=[];positions=None
-    def update(k,v,name):
-        events.append(name)
-        for i,pos in enumerate(positions.tolist()):
-            caches[name].kv_cache[pos//4,0,pos%4]=torch.cat((k[i,0],v[i,0]))
-    env=dict(torch=torch,nn=nn,get_forward_context=lambda:context,unified_kv_cache_update=update)
-    exec(compile(ast.Module(body=selected,type_ignores=[]),str(source),'exec'),env)
-    attention=env['OuroLatentAttention']()
-    attention.hidden_size,attention.num_heads,attention.head_dim=16,2,8
-    attention.loops,attention.rank,attention.rank_v,attention.rank1=4,8,8,8
-    attention.latent=deepcopy(student.layers[0]);attention._reg=None
-    attention.attn_main,attention.attn_l1=caches['main'],caches['l1']
-    for name in ('q_proj','k_proj','v_proj','o_proj'):
-        proj=TupleLinear(16,16,bias=False)
-        proj.weight.data.copy_(getattr(model.model.layers[0].self_attn,name).weight)
-        setattr(attention,name,proj)
-    rope=env['LatentRope'](8,8,model.config.rope_theta,128)
-    prefix=None
-    for start,end in ((0,3),(3,4),(4,5)):
-        positions=torch.arange(start,end);n=end-start
-        cos,sin=rope.tables(positions,torch.float32)
-        attention.step=dict(exact=(cos,sin),main=(cos,sin),l1=(cos,sin),requests=[(0,n,start)])
-        context.attn_metadata={name:SimpleNamespace(num_actual_tokens=n,block_table=torch.tensor([[0,1]])) for name in caches}
-        trajectory=[];events.clear()
-        for loop in range(4):
-            h=torch.randn(1,n,16);trajectory.append(h)
-            actual=attention(positions,h[0],loop)
-            q,k,v=[getattr(attention,name)(h)[0].view(1,n,2,8).transpose(1,2) for name in ('q_proj','k_proj','v_proj')]
-            qr,kr=apply_rope(q,cos[:,0][None],sin[:,0][None]),apply_rope(k,cos[:,0][None],sin[:,0][None])
-            logits=(qr@kr.transpose(-1,-2))/8**.5
-            logits=logits.masked_fill(torch.ones(n,n,dtype=torch.bool).triu(1),-torch.inf)
-            if prefix is not None:
-                historical=attention.latent.scores(loop,q,prefix,cos[:,0][None],sin[:,0][None])
-                probs=torch.cat((historical,logits),-1).softmax(-1)
-                result=attention.latent.read_out(loop,probs[...,:start],prefix)+probs[...,start:]@v
-            else:result=logits.softmax(-1)@v
-            expected=attention.o_proj(result.transpose(1,2).reshape(1,n,16))[0][0]
-            torch.testing.assert_close(actual,expected,rtol=2e-5,atol=2e-7)
-            assert events==(['l1','main'] if loop==3 else ['l1'])
-        sl=attention.latent
-        row=sl.pack(sl.write(trajectory)[-1],sl.write1(trajectory[0]),cos[:,0][None],sin[:,0][None])
-        prefix=row if prefix is None else torch.cat((prefix,row),1)
-        from ouro_depth.vllm_latent.cache_view import paged_prefix
-        for name,expected in (('main',prefix[0,:,:16]),('l1',prefix[0,:,16:])):
-            torch.testing.assert_close(paged_prefix(caches[name].kv_cache,torch.tensor([0,1]),end,8),expected)
+def test_prefill_decode_page_crossing_mixed_and_padding_match_training_oracle():
+    model, student, _, _ = fixture(full=True)
+    sim = Sim(model, student.layers[0])
+    sim.run_step([(0, 3)])                                 # full-prompt prefill, empty history
+    sim.run_step([(0, 1)])                                 # decode over 3 history rows
+    sim.run_step([(0, 1)])                                 # decode with ctx 4: history fills a page, token opens a new one
+    sim.run_step([(1, 3), (2, 4)])                         # two prefills in one batch
+    sim.run_step([(1, 1), (3, 2), (2, 1)], padded_requests=1, padding_tokens=1)  # interleaved decode/prefill
+    ctx = sim.run_step([(0, 1), (3, 1)], padding_tokens=2)  # padding tokens without a padded request
+    assert ctx.token_requests.tolist() == [0, 1, 1, 1] and ctx.ctx.tolist() == [5, 2, 0, 0]
+    assert {rid: rows.shape[0] for rid, rows in sim.history.items()} == {0: 6, 1: 4, 2: 5, 3: 3}
+
+
+def test_profiling_context_skips_history_and_writes():
+    model, student, _, _ = fixture(full=True)
+    sl, T = student.layers[0], 5
+    attn = model.model.layers[0].self_attn
+    positions = torch.arange(T)
+    inv_freq = s6_layer.latent_inv_freq(sl.head_dim, model.config.rope_theta)
+    tables = {w: s6_layer.latent_rope_table(model.config.max_position_embeddings, inv_freq, w, torch.float32) for w in (sl.rank, sl.rank1)}
+    ctx = s6_layer.StepContext(positions, None, None, None, T, tables, 1 / math.sqrt(sl.head_dim), TORCH_BACKENDS)
+    assert not ctx.md_present and ctx.valid.all() and (ctx.ctx == 0).all() and ctx.max_query_len == T
+    cos, sin = model.model.rotary_emb(torch.zeros(1, T, sl.hidden), positions[None])
+    h = torch.randn(T, sl.hidden)
+    q, k, v = (getattr(attn, name)(h).view(T, sl.heads, sl.head_dim) for name in ('q_proj', 'k_proj', 'v_proj'))
+    q_rope, k_rope = (apply_rope(x.transpose(0, 1)[None], cos, sin)[0].transpose(0, 1) for x in (q, k))
+    out = s6_layer.attend(sl, 1, ctx.latent_query(sl, 1, q), q_rope, k_rope, v, None, None, None, None, ctx)
+    oracle = mixed_attention(sl, 1, *(x.transpose(0, 1)[None] for x in (q, k, v)), cos, sin,
+                             torch.ones(1, T, dtype=torch.bool), (), ())
+    torch.testing.assert_close(out, oracle[0].transpose(0, 1), rtol=2e-5, atol=2e-7)
+    state = s6_layer.write_rows(sl, 0, h)
+    assert s6_layer.committed_row(sl, 1, s6_layer.write_rows(sl, 1, h, state), ctx) is None

@@ -13,7 +13,6 @@ from ouro_depth.latent.batched_engine import BatchedRollingEngine
 from ouro_depth.latent.corpus_index import RecordIndex
 from ouro_depth.latent.generate import LatentDecoder
 from ouro_depth.latent.evaluate_recipe import evaluate
-from ouro_depth.vllm_latent.cache_view import paged_prefix
 
 
 def make_data(path,ids):
@@ -26,9 +25,16 @@ def make_data(path,ids):
     (path/'manifest.json').write_text('{"test":true}')
 
 
-def test_entrypoints_stage_handoff_and_native_resume(tmp_path):
+@pytest.mark.parametrize('batching', ['legacy', 'length'])
+def test_entrypoints_stage_handoff_and_native_resume(tmp_path, batching):
     model,_,teacher,ids=fixture()
     data=tmp_path/'data';make_data(data,ids)
+    if batching == 'length':
+        path=data/'train.jsonl'
+        rows=[json.loads(line) for line in path.read_text().splitlines()]
+        rows[0]['input_ids']=rows[0]['input_ids'][:7]
+        rows[1]['prompt_len']=4
+        path.write_text(''.join(json.dumps(row)+'\n' for row in rows))
     def new_teacher(*a,**kw):
         from ouro_depth.latent.teacher import Teacher
         return Teacher.wrap(deepcopy(model))
@@ -42,6 +48,7 @@ def test_entrypoints_stage_handoff_and_native_resume(tmp_path):
                      '--init-blocks','2','--calibration-length','8','--eval-every','2','--save-every','1',
                      '--resume',str(stage1/'checkpoint-000001')])
     args=base+['--steps','1,1','--stage1-student',str(stage1/'student-2.pt'),
+               '--stage2-batching',batching,
                '--prefill-chunk-sizes','3','--prefill-horizon-tokens','3','--prompt-chunk-size','3',
                '--tbptt','2','--save-every','1','--eval-every','2']
     complete=tmp_path/'complete';resumed=tmp_path/'resumed'
@@ -51,12 +58,26 @@ def test_entrypoints_stage_handoff_and_native_resume(tmp_path):
         s23.main(args+['--output-dir',str(resumed),'--resume',str(resumed/'checkpoint-000001')])
     a=torch.load(complete/'checkpoint-000002/training.pt',weights_only=False)
     b=torch.load(resumed/'checkpoint-000002/training.pt',weights_only=False)
+    assert 'eval_prefill_chunk_sizes' not in a['metadata']
+    if batching == 'legacy':assert 'stage2_batching' not in a['metadata']
+    else:assert a['metadata']['stage2_batching']=='length'
     for n,x in a['student'].items():torch.testing.assert_close(x,b['student'][n],rtol=0,atol=0)
     for index,state in a['optimizer']['state'].items():
         for key,value in state.items():torch.testing.assert_close(value,b['optimizer']['state'][index][key],rtol=0,atol=0)
     records=[json.loads(x) for x in (resumed/'rank-0.jsonl').read_text().splitlines()]
     assert [r['stage'] for r in records if r['event']=='update']==[2,3]
     assert all(r['writer_update'][n]>0 for r in records if r['event']=='update' for n in r['writer_update'])
+
+
+def test_length_groups_reproduce_measured_profile_batches():
+    from ouro_depth.latent.training_common import example_groups
+    from ouro_depth.latent.profile_stage2 import groups_for
+    rows=[dict(record_id=str(i),input_ids=list(range(7+i%4)),prompt_len=1+i%3) for i in range(16)]
+    for size in (2,4,8,16):
+        actual=list(example_groups(rows,size,group_by='length'))
+        assert actual==groups_for(rows,size)
+        assert sorted(r['record_id'] for batch in actual for r in batch)==sorted(r['record_id'] for r in rows)
+    assert list(example_groups(rows,4))==groups_for(rows,4,legacy=True)
 
 
 def test_microbatch_gradient_sum_matches_batched_variable_lengths():
@@ -111,20 +132,13 @@ def test_generation_and_evaluation_share_engine():
     assert metrics['prefill_count']==2 and metrics['decode_count']==7
 
 
-def test_paged_prefix_honors_logical_layout_and_block_order():
-    # NHD physical allocation with HND logical shape, matching Triton metadata.
-    cache=torch.arange(3*4*1*16,dtype=torch.float32).view(3,4,1,16).transpose(1,2)
-    order=torch.tensor([2,0,1]);out=paged_prefix(cache,order,6,8)
-    expected=torch.cat((cache[2,0],cache[0,0]),0)[:6]
-    torch.testing.assert_close(out,expected,rtol=0,atol=0)
-    assert paged_prefix(cache,order,0,8).shape==(0,16)
-    with pytest.raises(ValueError):paged_prefix(cache,order,6,4)
-
-
 def test_invalid_s6_options_rejected():
     base=['--model-path','m','--data-dir','d','--output-dir','o','--stage1-student','s']
     with pytest.raises(SystemExit):s23.parse(base+['--stage3-precompute-loop1'])
     with pytest.raises(SystemExit):s23.parse(base+['--stage3-parallel-windows','2'])
+    with pytest.raises(SystemExit):s23.parse(base+['--eval-prefill-chunk-sizes','0'])
+    separate=s23.parse(base+['--prefill-chunk-sizes','256','--eval-prefill-chunk-sizes','32,64,128,256'])
+    assert separate.prefill_chunk_sizes==(256,) and separate.eval_prefill_chunk_sizes==(32,64,128,256)
     with pytest.raises(TypeError):
         from ouro_depth.latent.register import LatentStudent
         LatentStudent(2,16,2,8,writer='register')
@@ -150,11 +164,15 @@ def test_stage1_relative_mse_is_microbatch_invariant():
 
 
 def test_serving_rejects_geometry_and_rope_mismatch():
-    from ouro_depth.vllm_latent.cache_view import validate_geometry
+    from types import SimpleNamespace
+    from ouro_depth.vllm_latent.geometry import rope_theta,validate_geometry
     model,student,_,_=fixture()
     validate_geometry(model.config,student.cfg)
     for key in ('loops','num_layers','hidden','heads','head_dim'):
         bad=dict(student.cfg);bad[key]+=1
         with pytest.raises(ValueError,match=key):validate_geometry(model.config,bad)
-    model.config.rope_scaling={'rope_type':'linear','factor':2.}
-    with pytest.raises(ValueError,match='RoPE'):validate_geometry(model.config,student.cfg)
+    model.config.num_key_value_heads-=1
+    with pytest.raises(ValueError,match='multi-head'):validate_geometry(model.config,student.cfg)
+    assert rope_theta(SimpleNamespace(rope_theta=1e6,rope_parameters={'rope_type':'default','rope_theta':1e6}))==1e6
+    for params in ({'rope_type':'linear','rope_theta':1e6,'factor':2.},{'rope_theta':1e4}):   # rope_parameters is the only source of truth
+        with pytest.raises(ValueError,match='RoPE'):rope_theta(SimpleNamespace(rope_theta=1e6,rope_parameters=params))

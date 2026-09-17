@@ -33,7 +33,7 @@ S5 stage3b 的 8 卡 Triton MATH500 已完成：avg@4 **51.15%**、pass@4 **69.2
 | `ouro_depth/latent/train_recipe.py` | S6 Stage2 滑动重放与 Stage3 TBPTT、全参数训练和恢复 |
 | `ouro_depth/latent/corpus_index.py` / `prepare_recipe_data.py` | 文档级数据划分、来源采样与恢复游标 |
 | `ouro_depth/latent/batched_engine.py` / `rolling_engine.py` | Latent prefill、真实 rolling decode 与训练计算图 |
-| `ouro_depth/vllm_latent/` | S6 eager paged reference 推理与评测；当前未通过 GPU 数值容差 |
+| `ouro_depth/vllm_latent/` | S6 latent cache 的 vLLM 0.26 融合 serving 路径（Triton 分页历史 + FA2 当前块 + LSE 合并，FULL_DECODE_ONLY CUDA graph）、HF 对拍/资格门与 base-vs-S6 吞吐套件；trisol 资格已通过，吞吐见 `INFERENCE_COMPARISON_20260917.md` |
 | `ouro_depth/tests/` | 数值、数据、梯度路径及恢复检查 |
 
 ## 已有基线（Ouro-1.4B base，exact KV，8K 上限，2026-09-14）

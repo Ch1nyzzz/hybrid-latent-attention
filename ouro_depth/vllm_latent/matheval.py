@@ -3,6 +3,8 @@ baseline (temperature 1.0, top_p 0.7, n samples, 8K max): avg@n, pass@n, truncat
 import argparse, json, signal, sys, time
 from pathlib import Path
 
+from .serving_config import attach_engine_log, compilation_kwargs, cudagraph_mode, kv_capacity, parse_engine_log, resolve_backend
+
 INSTR = "\nPlease reason step by step, and put your final answer within \\boxed{}."
 
 
@@ -24,12 +26,13 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True); p.add_argument("--student", default=""); p.add_argument("--data", required=True); p.add_argument("--output", required=True)
     p.add_argument("--base", action="store_true"); p.add_argument("--attention-config", default="", help="JSON for vLLM attention_config (e.g. use_prefill_decode_attention)"); p.add_argument("--backend", default=""); p.add_argument("--loops", type=int, default=4)
-    p.add_argument("--compile-config", default="", help="JSON compilation_config; use FULL_DECODE_ONLY only after graph correctness validation")
+    p.add_argument("--compile-config", default="", help="JSON compilation_config (e.g. {\"cudagraph_mode\":\"FULL_DECODE_ONLY\"}); use only after graph qualification")
     p.add_argument("--n", type=int, default=4); p.add_argument("--temperature", type=float, default=1.0); p.add_argument("--top-p", type=float, default=0.7)
     p.add_argument("--max-new", type=int, default=8192); p.add_argument("--max-model-len", type=int, default=10240); p.add_argument("--gpu-mem", type=float, default=0.85)
     p.add_argument("--shard", type=int, default=0); p.add_argument("--nshards", type=int, default=1); p.add_argument("--limit", type=int, default=0); p.add_argument("--seed", type=int, default=0)
     p.add_argument("--request-batch", type=int, default=0, help="problems per generate call; 0 means entire shard")
     p.add_argument("--max-num-seqs", type=int, default=256)
+    p.add_argument("--engine-log", default="", help="file receiving stdout/stderr (engine included); parsed for the KV pool size")
     args = p.parse_args()
     if args.n < 1 or args.nshards < 1 or not 0 <= args.shard < args.nshards or args.request_batch < 0 or args.max_num_seqs < 1:
         p.error('invalid sampling, sharding or batching configuration')
@@ -40,17 +43,18 @@ def main():
     rows = rows[args.shard::args.nshards]
     if not rows:
         p.error('empty evaluation shard')
-    if not args.base:
-        if args.compile_config:
-            p.error('S6 reference adapter supports eager execution only')
-        if args.backend not in ('', 'TRITON_ATTN'):
-            p.error('S6 reference adapter requires TRITON_ATTN')
-        args.backend='TRITON_ATTN'
+    try:
+        args.backend = resolve_backend(args.base, args.backend)
+        cc = compilation_kwargs(args.compile_config, args.max_num_seqs)   # graphs sized for the whole request batch
+    except ValueError as e:
+        p.error(str(e))
+    if args.engine_log:
+        attach_engine_log(args.engine_log)
     from vllm import LLM, SamplingParams
     ovr = {"total_ut_steps": args.loops} if args.base else {"total_ut_steps": args.loops, "latent_student": args.student}
-    cc = {"compilation_config": json.loads(args.compile_config)} if args.compile_config else {"enforce_eager": True}
-    # Full-prompt policy must match the S6 HF reference.
-    # Keep the same full-prompt prefill semantics as the HF reference/compare.py.
+    # Full-prompt policy must match the S6 HF reference (scheduler chunked prefill off). vLLM V1 still re-prefills a
+    # PREEMPTED request's prompt plus its generated tokens as one chunk; the KV-capacity fields in the summary
+    # (kv_fits False = max_num_seqs full-length sequences do not fit) say when that could have happened.
     llm = LLM(model=args.model, hf_overrides=ovr, trust_remote_code=True, dtype="bfloat16", **cc, enable_prefix_caching=False, enable_chunked_prefill=False,
               max_model_len=args.max_model_len, max_num_batched_tokens=max(8192, args.max_model_len), max_num_seqs=args.max_num_seqs, gpu_memory_utilization=args.gpu_mem, seed=args.seed + args.shard,
               **({"attention_backend": args.backend} if args.backend else {}), **({"attention_config": json.loads(args.attention_config)} if args.attention_config else {}))
@@ -82,11 +86,15 @@ def main():
             f.flush()
             print(json.dumps({"GEN_PROGRESS": {"done_problems": start + len(batch), "of": len(rows), "elapsed": round(time.time()-t0), "student": args.student}}), flush=True)
     N = len(rows) * args.n
-    summ = {"mode": "base" if args.base else "latent", "backend": args.backend or "auto", "compile_config": args.compile_config, "chunked_prefill": False, "prompt_chunk_size": 0, "loops": args.loops, "student": args.student, "shard": args.shard, "n_problems": len(rows), "n_samples": args.n, "temperature": args.temperature,
+    summ = {"mode": "base" if args.base else "latent", "backend": args.backend or "auto", "compile_config": args.compile_config, "cudagraph_mode": cudagraph_mode(cc), "chunked_prefill": False, "prompt_chunk_size": 0, "loops": args.loops, "student": args.student, "shard": args.shard, "n_problems": len(rows), "n_samples": args.n, "temperature": args.temperature,
             "top_p": args.top_p, "avg_at_n": n_ok / N, "pass_at_n": sum(any(v) for v in per_problem.values()) / max(1, len(per_problem)), "mean_tokens": n_tok / N,
             "trunc_rate": n_trunc / N, "seconds": round(dt), "gen_tok_per_s": round(n_tok / dt, 1),
             "wall_seconds": round(time.time()-t0), "seed": args.seed, "max_new": args.max_new, "max_model_len": args.max_model_len,
             "request_batch": args.request_batch, "max_num_seqs": args.max_num_seqs, "nshards": args.nshards, "total_samples": N}
+    if args.engine_log:
+        sys.stdout.flush(); sys.stderr.flush()
+        summ["engine_log"] = parse_engine_log(Path(args.engine_log).read_text(errors="replace"))
+        summ.update(kv_capacity(summ["engine_log"]["kv_cache_tokens"], args.max_num_seqs, args.max_model_len))
     json.dump(summ, open(summary_path, "w"))
     print(json.dumps({"GEN_SUMMARY": summ}), flush=True); print("GEN_DONE", flush=True)
 
