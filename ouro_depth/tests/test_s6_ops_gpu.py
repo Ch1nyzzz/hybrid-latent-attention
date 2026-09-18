@@ -57,6 +57,58 @@ def test_history_attention_triton_matches_reference(width, block, splits):
         assert_history(o, lse, o_ref, lse_ref, batch)
 
 
+@mark.parametrize('rank', [512, 256, 128])
+@mark.parametrize('splits', [1, 16])
+def test_history_attention_kv_mla_per_head_matches_reference(rank, splits):
+    """LLA rows ``[c (rank) | k_rope (64)]`` per head: K is the whole row, V its first ``rank`` columns, read once (IS_MLA)."""
+    torch.manual_seed(5)
+    num_blocks, block, d_rope, ctx_values = 512, 16, 64, [3000, 700, 17, 1, 0]
+    cache = torch.randn(num_blocks, HEADS, block, rank + d_rope, dtype=BF16, device=CUDA)
+    k, v = cache[..., :rank + d_rope], cache[..., :rank]
+    for batch in (1, 8, 33):
+        ctx = torch.tensor((ctx_values * 7)[:batch], dtype=I32, device=CUDA)
+        table = torch.randint(0, num_blocks, (batch, -(-3000 // block)), dtype=I32, device=CUDA)
+        q = torch.randn(batch, HEADS, rank + d_rope, dtype=BF16, device=CUDA)
+        ws = s6_ops.S6Workspace(HEADS, rank, batch * splits)
+        o, lse = s6_ops.history_attention_kv(q, k, v, table, ctx, SCALE, splits, ws, ones(), ones(), 'triton', mla=True)
+        o_ref, lse_ref = s6_ops.history_attention_kv(q.float(), k.float(), v.float(), table, ctx, SCALE, 1, None, None, None, 'torch')
+        assert o.shape == (batch, HEADS, rank)
+        assert_history(o, lse, o_ref, lse_ref, batch)
+
+
+def test_history_attention_kv_mla_replays_inside_cuda_graph():
+    torch.manual_seed(6)
+    rank, d_rope, block, batch, splits, num_blocks = 512, 64, 16, 8, 8, 256
+    ws = s6_ops.S6Workspace(HEADS, rank, batch * splits)
+    ws.ensure(CUDA)
+    cache = torch.randn(num_blocks, HEADS, block, rank + d_rope, dtype=BF16, device=CUDA)
+    table = torch.randint(0, num_blocks, (batch, 64), dtype=I32, device=CUDA)
+    ctx = torch.randint(0, 1000, (batch,), dtype=I32, device=CUDA)
+    q = torch.randn(batch, HEADS, rank + d_rope, dtype=BF16, device=CUDA)
+    k_scale, v_scale = ones(), ones()
+
+    def run():
+        return s6_ops.history_attention_kv(q, cache[..., :rank + d_rope], cache[..., :rank], table, ctx, SCALE, splits, ws, k_scale, v_scale, 'triton', mla=True)
+
+    side = torch.cuda.Stream()
+    side.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(side):
+        run()
+    torch.cuda.current_stream().wait_stream(side)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, pool=torch.cuda.graph_pool_handle()):
+        o, lse = run()
+    for _ in range(2):
+        ctx.copy_(torch.randint(0, 1000, (batch,), dtype=I32, device=CUDA))
+        ctx[0] = 0
+        cache.copy_(torch.randn_like(cache))
+        q.copy_(torch.randn_like(q))
+        graph.replay()
+        torch.cuda.synchronize()
+        o_ref, lse_ref = s6_ops.history_attention_kv(q.float(), cache[..., :rank + d_rope].float(), cache[..., :rank].float(), table, ctx, SCALE, 1, None, None, None, 'torch')
+        assert_history(o, lse, o_ref, lse_ref, batch)
+
+
 def test_grouped_kernel_compiles_for_width_512_on_this_gpu():
     cache = torch.randn(64, 1, 16, 1024, dtype=BF16, device=CUDA)
     q = torch.randn(1, HEADS, 512, dtype=BF16, device=CUDA)
@@ -171,12 +223,15 @@ def test_latent_rope_kernel_matches_reference(width):
     q = torch.randn(HEADS, tokens, width, dtype=BF16, device=CUDA).transpose(0, 1)
     row = torch.randn(tokens, 2 * width, dtype=BF16, device=CUDA)
     row2, flat = row.clone(), q.reshape(tokens, -1)
-    for x, work in ((q, q.clone()), (row[:, :width], row2[:, :width]), (flat, flat.clone())):
+    lla = torch.randn(tokens, HEADS, 512 + width, dtype=BF16, device=CUDA)   # the LLA row / query tail: head stride 512 + w
+    lla2 = lla.clone()
+    for x, work in ((q, q.clone()), (row[:, :width], row2[:, :width]), (flat, flat.clone()), (lla[..., 512:], lla2[..., 512:])):
         ref = s6_ops.latent_rope(x, positions, table, 'torch')
         out = s6_ops.latent_rope(work, positions, table, 'vllm')
         assert out is work and out.shape == x.shape and out.stride() == x.stride()
         torch.testing.assert_close(out.float(), ref.float(), atol=2e-2, rtol=1e-2)
     assert torch.equal(row2[:, width:], row[:, width:])   # the in-place K rotation must not touch the V half
+    assert torch.equal(lla2[..., :512], lla[..., :512])   # nor the latent head of an LLA row
     flat, exact = s6_ops.probe_latent_rope(table, HEADS)
     assert flat is False and isinstance(exact, bool)   # head strides are honoured; bit-exactness is only reported
 

@@ -72,18 +72,19 @@ def history_lengths(seq_lens, query_start_loc):
     return (seq_lens - (query_start_loc[1:] - query_start_loc[:-1])).clamp_(min=0)
 
 
-def num_kv_splits(max_seq_len, num_tokens, split_max_tokens, sm_count):
+def num_kv_splits(max_seq_len, num_tokens, split_max_tokens, sm_count, head_blocks=1):
     """KV splits of the paged-history kernel for a step of ``num_tokens`` rows.
 
     1 above ``split_max_tokens`` (prefill-sized steps: bounded workspace, nothing to read anyway); otherwise enough
-    ``rows x splits`` programs to occupy every SM twice (TritonMLA's sequence-length heuristic is the floor, one
-    32-row block per split and ``2 * sm_count`` the ceiling). A function of constants and the row count only, so the
-    warm-up run compiles exactly what the CUDA graph of that batch size replays.
+    ``rows x head_blocks x splits`` programs to occupy every SM twice (TritonMLA's sequence-length heuristic is the
+    floor, one 32-row block per split and ``2 * sm_count`` the ceiling); ``head_blocks`` is the kernel's head-group
+    grid (1 for the MQA S6 cache, the head count for a per-head cache). A function of constants and the row count only,
+    so the warm-up run compiles exactly what the CUDA graph of that batch size replays.
     """
     if num_tokens > split_max_tokens:
         return 1
     ideal = 1 << (max(1, max_seq_len // 512) - 1).bit_length()
-    fill = -(-2 * sm_count // num_tokens)
+    fill = -(-2 * sm_count // (num_tokens * head_blocks))
     return max(1, min(max(ideal, fill), 2 * sm_count, -(-max_seq_len // 32)))
 
 
@@ -113,51 +114,69 @@ class S6Workspace:
 
 
 def history_attention(q_lat, cache, block_table, ctx, scale, num_kv_splits, workspace, k_scale, v_scale, backend, empty=None):
-    """Fully visible attention of ``q_lat[T,H,W]`` over the first ``ctx[t]`` paged latent rows.
+    """Fully visible attention of ``q_lat[T,H,W]`` over the first ``ctx[t]`` paged latent rows of an MQA S6 cache.
 
-    ``cache`` is the logical vLLM layout ``[num_blocks, 1, block, 2W]`` (K then V on the last
-    dim, any strides), ``block_table[T, max_blocks]`` int32 is per token, ``ctx[T]`` int32,
-    ``empty`` the ``ctx == 0`` mask (computed here when None). Only block-table columns
-    ``< ceil(ctx[t] / block)`` are read. Returns ``(o[T,H,W] in q's dtype, lse[H,T] fp32)``;
-    empty rows give ``o = 0``, ``lse = -inf``.
+    ``cache`` is the logical vLLM layout ``[num_blocks, 1, block, 2W]`` (K then V on the last dim, any strides); see
+    ``history_attention_kv`` for the contract shared with per-head caches.
+    """
+    W = q_lat.shape[-1]
+    return history_attention_kv(q_lat, cache[..., :W], cache[..., W:], block_table, ctx, scale, num_kv_splits, workspace,
+                                k_scale, v_scale, backend, empty)
+
+
+def history_attention_kv(q, k, v, block_table, ctx, scale, num_kv_splits, workspace, k_scale, v_scale, backend, empty=None, mla=False):
+    """Fully visible attention of ``q[T,H,Lk]`` over the first ``ctx[t]`` paged rows of ``k[num_blocks,kvH,block,Lk]`` and
+    ``v[num_blocks,kvH,block,Lv]`` (any strides, ``H`` a multiple of ``kvH``).
+
+    ``block_table[T, max_blocks]`` int32 is per token, ``ctx[T]`` int32, ``empty`` the ``ctx == 0`` mask (computed here
+    when None). Only block-table columns ``< ceil(ctx[t] / block)`` are read. ``mla`` declares ``v`` to be the first
+    ``Lv`` columns of ``k`` (the LLA absorb row ``[c | k_rope]``): the Triton backend then reads the row once and
+    scores its tail against the query tail, as vLLM's MLA decode does. Returns ``(o[T,H,Lv] in q's dtype, lse[H,T]
+    fp32)``; empty rows give ``o = 0``, ``lse = -inf``.
     """
     if empty is None:
         empty = ctx == 0
     if backend == 'torch':
-        return _history_reference(q_lat, cache, block_table, ctx, empty, scale)
+        return _history_reference(q, k, v, block_table, ctx, empty, scale)
     if backend != 'triton':
         raise ValueError(f'Unknown history backend {backend!r}')
-    from vllm.v1.attention.ops.triton_decode_attention import decode_attention_fwd
-    T, H, W = q_lat.shape
-    if q_lat.stride(-1) != 1:
+    from vllm.v1.attention.ops.triton_decode_attention import decode_attention_fwd, decode_attention_fwd_grouped
+    T, H, Lk = q.shape
+    Lv = v.shape[-1]
+    if q.stride(-1) != 1:
         raise ValueError('decode_attention_fwd needs a unit last-dim stride for q')
-    k, v = cache[..., :W].transpose(1, 2), cache[..., W:].transpose(1, 2)
-    o = torch.empty(T, H, W, dtype=q_lat.dtype, device=q_lat.device)
-    lse = torch.empty(T, H, dtype=torch.float32, device=q_lat.device)
-    logits = workspace.attn_logits(T, H, num_kv_splits, W, q_lat.device)
-    decode_attention_fwd(q_lat, k, v, o, lse, block_table, ctx, logits, num_kv_splits, scale,
-                         page_size=cache.shape[2], k_scale=k_scale, v_scale=v_scale)
+    kb, vb = k.transpose(1, 2), v.transpose(1, 2)  # the kernel's (..., PAGE_SIZE, NUM_HEADS, HEAD_DIM)
+    o = torch.empty(T, H, Lv, dtype=q.dtype, device=q.device)
+    lse = torch.empty(T, H, dtype=torch.float32, device=q.device)
+    logits = workspace.attn_logits(T, H, num_kv_splits, Lv, q.device)
+    if mla:  # the grouped kernel's IS_MLA path (BLOCK_DMODEL = Lv, BLOCK_DPE = Lk - Lv), also for kv_group_num == 1
+        decode_attention_fwd_grouped(q, kb, vb, o, lse, block_table, ctx, logits, num_kv_splits, scale,
+                                     page_size=k.shape[2], k_scale=k_scale, v_scale=v_scale, is_mla=True)
+    else:
+        decode_attention_fwd(q, kb, vb, o, lse, block_table, ctx, logits, num_kv_splits, scale,
+                             page_size=k.shape[2], k_scale=k_scale, v_scale=v_scale)
     # Stage 2 leaves NaN / -inf on empty rows; NaN * 0 in the merge would keep it, so o is zeroed too.
     return o.masked_fill_(empty[:, None, None], 0), lse.masked_fill_(empty[:, None], -INF).t().contiguous()
 
 
-def _history_reference(q_lat, cache, block_table, ctx, empty, scale):
-    T, H, W = q_lat.shape
-    block = cache.shape[2]
-    o = torch.zeros(T, H, W, dtype=q_lat.dtype, device=q_lat.device)
-    lse = torch.full((H, T), -INF, dtype=torch.float32, device=q_lat.device)
+def _history_reference(q, k, v, block_table, ctx, empty, scale):
+    T, H, Lk = q.shape
+    kv_heads, block, Lv = k.shape[1], k.shape[2], v.shape[-1]
+    o = torch.zeros(T, H, Lv, dtype=q.dtype, device=q.device)
+    lse = torch.full((H, T), -INF, dtype=torch.float32, device=q.device)
     pages = (int(ctx.max()) + block - 1) // block
     if pages == 0:
         return o, lse
     cols = torch.arange(pages, device=ctx.device)
-    ids = torch.where(cols[None, :] < (ctx[:, None] + block - 1) // block, block_table[:, :pages], 0)
-    rows = cache[ids.long(), 0].reshape(T, pages * block, 2 * W).float()
+    ids = torch.where(cols[None, :] < (ctx[:, None] + block - 1) // block, block_table[:, :pages], 0).long()
+    gather = lambda buf: buf[ids].transpose(1, 2).reshape(T, kv_heads, pages * block, buf.shape[-1]).float()  # [T,kvH,J,L]
+    rows_k, rows_v = gather(k), gather(v)
     visible = torch.arange(pages * block, device=ctx.device)[None, :] < ctx[:, None]
-    scores = torch.einsum('thw,tjw->thj', q_lat.float(), rows[..., :W]) * scale
-    scores = scores.masked_fill(~visible[:, None, :], -INF)
-    out = torch.einsum('thj,tjw->thw', torch.softmax(scores, -1), rows[..., W:].masked_fill(~visible[..., None], 0))
-    o.copy_(out.masked_fill(empty[:, None, None], 0))
-    lse.copy_(torch.logsumexp(scores, -1).masked_fill(empty[:, None], -INF).t())
+    scores = torch.einsum('tgqw,tgjw->tgqj', q.float().view(T, kv_heads, H // kv_heads, Lk), rows_k) * scale
+    scores = scores.masked_fill(~visible[:, None, None, :], -INF)
+    out = torch.einsum('tgqj,tgjw->tgqw', torch.softmax(scores, -1), rows_v.masked_fill(~visible[:, None, :, None], 0))
+    o.copy_(out.reshape(T, H, Lv).masked_fill(empty[:, None, None], 0))
+    lse.copy_(torch.logsumexp(scores, -1).reshape(T, H).masked_fill(empty[:, None], -INF).t())
     return o, lse
 
 

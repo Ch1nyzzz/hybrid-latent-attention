@@ -255,11 +255,26 @@ def test_case_env_isolation():
     assert hf["PYTHONPATH"] == "/work/hf-deps:/work/loop_scale" and hf["HF_HUB_OFFLINE"] == "1" and hf["HOME"] == "/root" and "VLLM_CACHE_ROOT" not in hf
     copy = suite.case_env("s6", 1, "/work/loop_scale", "copy", base, "/o/c")
     assert copy["PYTHONPATH"] == "/work/loop_scale" and "S6_VLLM_OURO" not in copy
+    lla = suite.case_env("lla", 2, "/work/loop_scale", "alias", base, "/o/lla.vllm-cache")   # same shim, the LLA adapter file
+    assert lla["S6_VLLM_OURO_FILE"] == "/work/loop_scale/ouro_depth/vllm_latent/ouro_lla.py" and lla["S6_VLLM_OURO"] == "alias"
+    assert lla["PYTHONPATH"] == s6["PYTHONPATH"] and lla["CUDA_VISIBLE_DEVICES"] == "2"
+    assert [suite.method_kind(m) for m in ("base", "s6", "lla512", "lla8")] == ["base", "s6", "lla", "lla"]
+    for bad in ("lla", "lla0", "LLA512", "s7", "lla512x"):
+        with pytest.raises(ValueError):
+            suite.method_kind(bad)
+    assert suite.parse_methods("base, lla512,lla128") == ["base", "lla512", "lla128"]
+    for bad in ("", "base,base", "base,mla1"):
+        with pytest.raises(ValueError):
+            suite.parse_methods(bad)
 
 
 def test_argv_builders():
     tp = suite.tp_compare_argv("s6", 4096, 32, Path("/o"), Path("/l.log"), "py")
     assert tp[:3] == ["py", "-m", "ouro_depth.vllm_latent.compare"] and "--base" not in tp
+    lla = suite.tp_compare_argv("lla256", 4096, 32, Path("/o"), Path("/l.log"), "py", lla_codec="/c.pt")
+    assert lla[lla.index("--lla-codec") + 1] == "/c.pt" and lla[lla.index("--lla-rank") + 1] == "256" and "--student" not in lla
+    assert lla[lla.index("--backend") + 1] == "TRITON_ATTN" and lla[lla.index("--max-model-len"):] == tp[tp.index("--max-model-len"):]
+    assert suite._method_args("lla512")[:2] == ["--lla-codec", suite.LLA_CODEC]
     assert tp[tp.index("--backend") + 1] == "TRITON_ATTN" and tp[tp.index("--student") + 1] == suite.STUDENT
     assert tp[tp.index("--max-model-len") + 1] == "4352" and tp[tp.index("--max-num-seqs") + 1] == "32" and tp[tp.index("--throughput") + 1] == "32"
     assert tp[tp.index("--tp-tokens") + 1] == "128" and "--decode-timing" in tp and json.loads(tp[tp.index("--compile-config") + 1]) == {"cudagraph_mode": "FULL_DECODE_ONLY", "mode": 0}
@@ -284,14 +299,19 @@ def test_engine_log_and_result_checks():
     capture = "Capturing CUDA graphs (FULL)\nGraph capturing finished in 1 secs, took 0.05 GiB\n"
     fdo = capture + "S6_VLLM_OURO alias ...\n" + check
     assert suite.engine_log_problems(fdo, "s6", "FULL_DECODE_ONLY", "alias") == []
-    assert suite.engine_log_problems(capture + check, "s6", "FULL_DECODE_ONLY", "alias") == ["S6 adapter shim line missing from the engine log"]
+    assert suite.engine_log_problems(capture + check, "s6", "FULL_DECODE_ONLY", "alias") == ["s6 adapter shim line missing from the engine log"]
+    lla = capture + "S6_VLLM_OURO alias ...\n" + "LLA_RUNTIME_CHECK {}\n" + MODE0
+    assert suite.engine_log_problems(lla, "lla512", "FULL_DECODE_ONLY", "alias") == []
+    assert suite.engine_log_problems(fdo, "lla128", "FULL_DECODE_ONLY", "alias") == ["no LLA_RUNTIME_CHECK line (adapter geometry/rope checks did not run)"]
+    assert suite.engine_log_problems(lla, "s6", "FULL_DECODE_ONLY", "alias") == ["no S6_RUNTIME_CHECK line (adapter geometry/rope checks did not run)"]
+    assert suite.student_problems({"student": ""}, "lla512") == [] and suite.student_problems({"student": ""}, "s6") and suite.student_problems({"student": suite.STUDENT}, "s6") == []
     assert suite.engine_log_problems(capture + check, "s6", "FULL_DECODE_ONLY", "copy") == []
     assert suite.engine_log_problems("S6_VLLM_OURO alias\n" + check, "s6", "", "alias") == []
     assert suite.engine_log_problems("S6_VLLM_OURO alias\n" + MODE0, "s6", "", "alias") == ["no S6_RUNTIME_CHECK line (adapter geometry/rope checks did not run)"]
     assert "no FULL CUDA graph capture in the engine log" in suite.engine_log_problems("S6_VLLM_OURO\n" + check, "s6", "FULL_DECODE_ONLY", "alias")
     assert any("PIECEWISE" in p for p in suite.engine_log_problems(fdo + "Capturing CUDA graphs (mixed prefill-decode, PIECEWISE)", "s6", "FULL_DECODE_ONLY", "alias"))
     assert suite.engine_log_problems(fdo + "cudagraph_mode=PIECEWISE is the default", "s6", "FULL_DECODE_ONLY", "alias") == []   # a mention is not a capture
-    assert suite.engine_log_problems("S6_VLLM_OURO alias\n" + MODE0 + capture, "base", "FULL_DECODE_ONLY", "alias") == ["base case loaded the S6 adapter shim"]
+    assert suite.engine_log_problems("S6_VLLM_OURO alias\n" + MODE0 + capture, "base", "FULL_DECODE_ONLY", "alias") == ["base case loaded an adapter shim"]
     assert suite.engine_log_problems(MODE0, "base", "", "alias") == [] and suite.engine_log_problems(MODE0 + capture, "base", "FULL_DECODE_ONLY", "alias") == []
     # base rows under graphs need the same capture line, and every row must prove compilation mode 0 (in-tree Ouro is @support_torch_compile-decorated)
     assert suite.engine_log_problems(MODE0, "base", "FULL_DECODE_ONLY", "alias") == ["no FULL CUDA graph capture in the engine log"]
@@ -322,10 +342,13 @@ def test_engine_log_and_result_checks():
 
 
 def test_peak_planning():
-    units = suite.peak_units(range(8))   # both methods of a prompt back-to-back on one GPU, prompts round-robin
-    assert [(u["prompt"], u["method"], u["gpu"]) for u in units] == [(p, m, g) for g, p in enumerate((128, 1024, 4096, 8192)) for m in ("base", "s6")]
-    assert units[0]["label"] == "base-p128-peak" and [u["gpu"] for u in suite.peak_units(range(1, 8))] == [1, 1, 2, 2, 3, 3, 4, 4]
-    assert [u["gpu"] for u in suite.peak_units(range(1, 3))] == [1, 1, 2, 2, 1, 1, 2, 2]
+    units = suite.peak_units(range(8))   # one unit per (prompt, method), round-robin over the GPUs
+    assert [(u["prompt"], u["method"], u["gpu"]) for u in units] == [(p, m, 2 * i + j) for i, p in enumerate((128, 1024, 4096, 8192)) for j, m in enumerate(("base", "s6"))]
+    assert units[0]["label"] == "base-p128-peak" and [u["gpu"] for u in suite.peak_units(range(1, 8))] == [1, 2, 3, 4, 5, 6, 7, 1]
+    assert [u["gpu"] for u in suite.peak_units(range(1, 3))] == [1, 2, 1, 2, 1, 2, 1, 2]
+    lla = suite.peak_units(range(8), ["lla512", "lla128", "base"])
+    assert len(lla) == 12 and [u["gpu"] for u in lla] == [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3] and lla[1]["label"] == "lla128-p128-peak"
+    assert suite.peak_units([]) == [] and suite.throughput_cases([], ["base"]) == []
     sweeps = {10: [10], 20: [16, 20], 65: [16, 32, 65], 105: [16, 32, 64, 105], 210: [16, 32, 64, 128, 210], 220: [16, 32, 64, 128, 220],
               700: [16, 32, 64, 128, 256, 512, 700], 2200: [16, 32, 64, 128, 256, 512, 1024, 2200]}
     assert {c: suite.sweep_concurrencies(c) for c in sweeps} == sweeps
@@ -365,7 +388,7 @@ def test_peak_sweep_flow(tmp_path, monkeypatch):
     (the S6 pool shrinks with max_num_seqs, as the engine's profile run does)."""
     capture = "Capturing CUDA graphs (FULL)\nGraph capturing finished in 1 secs, took 0.05 GiB\n"
 
-    def fake_argv(method, prompt, c, out, log, python=sys.executable, gen_tokens=suite.GEN_TOKENS):
+    def fake_argv(method, prompt, c, out, log, python=sys.executable, gen_tokens=suite.GEN_TOKENS, lla_codec=suite.LLA_CODEC):
         kv = {128: None, 1024: 256}.get(prompt, {"base": 87552, "s6": 913728 - 40 * c}[method])   # p128: a log without the KV line; p1024: a pool below one batch
         cap = sc.kv_capacity(kv, c, prompt + 2 * gen_tokens)
         doc = {"student": "" if method == "base" else suite.STUDENT, "throughput": {"seqs": c, "tok_per_s": float(c), "tokens_per_seq": gen_tokens, **cap,
@@ -374,7 +397,7 @@ def test_peak_sweep_flow(tmp_path, monkeypatch):
         code = f"import json, pathlib; p = pathlib.Path({str(out)!r}); p.mkdir(parents=True, exist_ok=True); (p / 'compare.json').write_text(json.dumps({doc!r})); print({lines!r})"
         return [sys.executable, "-c", code]
     monkeypatch.setattr(suite, "tp_compare_argv", fake_argv)
-    r = suite.Runner(NS(root=Path(__file__).resolve().parents[2], ouro_shim="alias", timeout=60, out=tmp_path))
+    r = suite.Runner(NS(root=Path(__file__).resolve().parents[2], ouro_shim="alias", timeout=60, out=tmp_path, lla_codec=suite.LLA_CODEC))
     suite.peak(r, {"label": "base-p8192-peak", "prompt": 8192, "method": "base", "gpu": 0})
     assert [x["label"] for x in r.rows] == ["base-p8192-c8-peak", "base-p8192-c10-peak", "base-p8192-peak"] and all(x["ok"] for x in r.rows)
     assert "c_max" not in r.rows[0] and r.rows[0]["gen_tokens"] == 128 and r.rows[1]["c_max"] == 10 and r.rows[1]["gen_tokens"] == 128 and r.rows[1]["stage"] == "peak"
@@ -418,10 +441,20 @@ def test_suite_dry_run_prints_plan(tmp_path, capsys):
     assert all(len(c["argv"]) == 2 for c in plan["throughput"]) and "peak" not in plan
     assert suite.main(["--dry-run", "--out", str(tmp_path), "--mode", "peak", "--skip-qualification"]) == 0
     peak = json.loads(capsys.readouterr().out)
-    assert "throughput" not in peak and [u["gpu"] for u in peak["peak"]] == [0, 0, 1, 1, 2, 2, 3, 3] and all(u["probe_argv"][u["probe_argv"].index("--throughput") + 1] == "8" for u in peak["peak"])
+    assert "throughput" not in peak and [u["gpu"] for u in peak["peak"]] == [0, 1, 2, 3, 4, 5, 6, 7] and all(u["probe_argv"][u["probe_argv"].index("--throughput") + 1] == "8" for u in peak["peak"])
     assert suite.main(["--dry-run", "--out", str(tmp_path), "--mode", "both"]) == 0
     both = json.loads(capsys.readouterr().out)
-    assert len(both["throughput"]) == 16 and [u["gpu"] for u in both["peak"]] == [1, 1, 2, 2, 3, 3, 4, 4]
+    assert len(both["throughput"]) == 16 and [u["gpu"] for u in both["peak"]] == [1, 2, 3, 4, 5, 6, 7, 1]
+    assert suite.main(["--dry-run", "--out", str(tmp_path), "--mode", "peak", "--skip-qualification", "--methods", "lla512,lla256,lla128,base", "--lla-codec", "/c.pt"]) == 0
+    lla = json.loads(capsys.readouterr().out)["peak"]
+    assert [u["method"] for u in lla][:5] == ["lla512", "lla256", "lla128", "base", "lla512"] and [u["gpu"] for u in lla] == [i % 8 for i in range(16)]
+    argv = lla[0]["probe_argv"]
+    assert argv[argv.index("--lla-codec") + 1] == "/c.pt" and argv[argv.index("--lla-rank") + 1] == "512" and "--student" not in argv and "--base" not in argv
+    assert argv[argv.index("--backend") + 1] == "TRITON_ATTN" and "--base" in lla[3]["probe_argv"]
+    with pytest.raises(SystemExit):
+        suite.main(["--dry-run", "--out", str(tmp_path), "--methods", "base,mla512"])
+    with pytest.raises(SystemExit):
+        suite.main(["--dry-run", "--out", str(tmp_path), "--methods", "base,base"])
     assert suite.main(["--dry-run", "--out", str(tmp_path), "--gpus", "1", "--mode", "both"]) == 0   # GPU 0 qualifies alone: nothing to plan for throughput
     alone = json.loads(capsys.readouterr().out)
     assert alone["throughput"] == [] and alone["peak"] == [] and len(alone["qualification"]) == 3
@@ -518,6 +551,12 @@ def test_bundle_members_and_determinism(tmp_path):
 
 
 def test_bootstrap_and_submit_argv(tmp_path):
+    argv = submit.submit_argv("job", 7, "boot", "key")
+    models = [argv[i + 1] for i, a in enumerate(argv) if a == "--model"]
+    assert models == [submit.STUDENT_ASSET, f"{submit.ASSET}:7"]   # mount order: model-0 student, model-1 code
+    with_codec = submit.submit_argv("job", 7, "boot", "key", ("loop-lla-codec-0917:1",))
+    assert [with_codec[i + 1] for i, a in enumerate(with_codec) if a == "--model"] == models + ["loop-lla-codec-0917:1"]   # model-2 = LLA_CODEC
+    assert suite.LLA_CODEC.startswith("/trisol/input/models/model-2/")
     boot = submit.bootstrap_script("ab" * 32, "alias")
     assert "ab" * 32 in boot and "/trisol/input/models/model-1/recipe-code.tar.gz" in boot and "--target /work/hf-deps transformers==4.56.2" in boot
     assert "s6shim/sitecustomize.py" in boot and "model_executor/models/ouro.py" not in boot and "patch_triton" not in boot

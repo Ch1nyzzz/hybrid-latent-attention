@@ -113,12 +113,11 @@ class OuroLatentAttention(nn.Module):
 
 
 class OuroDecoderLayer(nn.Module):
-    def __init__(self, config, latent_cfg: dict, cache_config: CacheConfig | None = None,
-                 quant_config: QuantizationConfig | None = None, prefix: str = ''):
+    """Ouro block around a latent-cache attention module (S6 here, LLA absorb in ``ouro_lla``) sharing this loop protocol."""
+
+    def __init__(self, config, self_attn: nn.Module, quant_config: QuantizationConfig | None = None, prefix: str = ''):
         super().__init__()
-        self.self_attn = OuroLatentAttention(config, latent_cfg, config.hidden_size, config.num_attention_heads,
-                                             config.num_key_value_heads, config.max_position_embeddings, cache_config,
-                                             quant_config, f'{prefix}.self_attn')
+        self.self_attn = self_attn
         self.mlp = OuroMLP(config.hidden_size, config.intermediate_size, config.hidden_act, quant_config, f'{prefix}.mlp')
         self.input_layernorm, self.input_layernorm_2, self.post_attention_layernorm, self.post_attention_layernorm_2 = (
             RMSNorm(config.hidden_size, eps=config.rms_norm_eps) for _ in range(4))
@@ -162,9 +161,11 @@ class OuroModel(nn.Module):
         self.config, self.quant_config, self.vocab_size = config, quant_config, config.vocab_size
         self.embed_tokens = VocabParallelEmbedding(config.vocab_size, config.hidden_size, quant_config=quant_config,
                                                    prefix=f'{prefix}.embed_tokens')
+        attention = lambda prefix: OuroLatentAttention(config, self.latent_cfg, config.hidden_size, config.num_attention_heads,
+                                                       config.num_key_value_heads, config.max_position_embeddings, cache_config,
+                                                       quant_config, f'{prefix}.self_attn')
         self.start_layer, self.end_layer, self.layers = make_layers(
-            config.num_hidden_layers,
-            lambda prefix: OuroDecoderLayer(config, self.latent_cfg, cache_config, quant_config, prefix),
+            config.num_hidden_layers, lambda prefix: OuroDecoderLayer(config, attention(prefix), quant_config, prefix),
             prefix=f'{prefix}.layers')
         self.make_empty_intermediate_tensors = make_empty_intermediate_tensors_factory(['hidden_states', 'residual'], config.hidden_size)
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -196,7 +197,8 @@ class OuroModel(nn.Module):
               'workspace_floats': self.workspace.floats, 'max_model_len': vllm_config.model_config.max_model_len,
               'max_num_batched_tokens': vllm_config.scheduler_config.max_num_batched_tokens}}), flush=True)
 
-    def load_latent_student(self) -> None:
+    def finish_loading(self) -> None:
+        """Strict per-layer load of the S6 student after vLLM's weight loader has filled the frozen body."""
         for i, layer in enumerate(self.layers):
             prefix = f'layers.{i}.'
             layer.self_attn.latent.load_state_dict(
@@ -256,6 +258,7 @@ def history_needed(ctx) -> bool:
 
 
 class OuroForCausalLM(nn.Module, SupportsLoRA):
+    MODEL = OuroModel   # ``ouro_lla`` swaps in its model; everything else is shared
     hf_to_vllm_mapper = WeightsMapper(orig_to_new_stacked={
         '.q_proj': ('.qkv_proj', 'q'), '.k_proj': ('.qkv_proj', 'k'), '.v_proj': ('.qkv_proj', 'v'),
         '.gate_proj': ('.gate_up_proj', 0), '.up_proj': ('.gate_up_proj', 1)})
@@ -265,7 +268,7 @@ class OuroForCausalLM(nn.Module, SupportsLoRA):
         super().__init__()
         config = vllm_config.model_config.hf_config
         self.config, self.quant_config = config, vllm_config.quant_config
-        self.model = OuroModel(vllm_config=vllm_config, prefix=maybe_prefix(prefix, 'model'))
+        self.model = self.MODEL(vllm_config=vllm_config, prefix=maybe_prefix(prefix, 'model'))
         self.lm_head = self.model.embed_tokens if config.tie_word_embeddings else ParallelLMHead(
             config.vocab_size, config.hidden_size, quant_config=self.quant_config, prefix=maybe_prefix(prefix, 'lm_head'))
         self.logits_processor = LogitsProcessor(config.vocab_size)
@@ -283,7 +286,7 @@ class OuroForCausalLM(nn.Module, SupportsLoRA):
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(self, skip_prefixes=(['lm_head.'] if self.config.tie_word_embeddings else None))
         loaded = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
-        self.model.load_latent_student()
-        # Student parameters come from the checkpoint above and the gate is unused: report both for vLLM's completeness check.
+        self.model.finish_loading()
+        # Student parameters come from the checkpoint above (LLA readers are buffers) and the gate is unused: report both for vLLM's completeness check.
         loaded.update(name for name, _ in self.named_parameters() if '.latent.' in name or 'early_exit_gate' in name)
         return loaded

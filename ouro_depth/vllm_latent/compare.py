@@ -1,4 +1,4 @@
-"""Compare a vLLM model (S6 latent cache, or the original Ouro with --base) against the HF reference (hf_reference.json):
+"""Compare a vLLM model (S6 latent cache, the original Ouro with --base, or the LLA absorb baseline with --lla-codec) against the HF reference (hf_reference.json):
 first-token logprobs after prefill, greedy token streams, top-K logprobs per generated position (vllm_logprobs.npz for
 the fixed-prefix KL gate), and a throughput probe with optional prefill/decode split timing (1-, N- and 2N-token runs;
 the decode rate is the N full-concurrency steps between the N and 2N runs, only when the engine's KV pool holds the
@@ -33,6 +33,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True); p.add_argument("--student", default=""); p.add_argument("--out", required=True)
     p.add_argument("--base", action="store_true", help="original Ouro model (exact per-loop KV): throughput baseline or base control")
+    p.add_argument("--lla-codec", default="", help="LLA absorb baseline (ouro_depth/lla PCA codec checkpoint); throughput only, with --lla-rank")
+    p.add_argument("--lla-rank", type=int, default=0, help="latent rank served from the (nested-rank) LLA codec")
     p.add_argument("--ref", default="", help="hf_reference.json (S6 student reference, or a --base reference); optional")
     p.add_argument("--loops", type=int, default=4); p.add_argument("--max-new", type=int, default=64); p.add_argument("--max-model-len", type=int, default=4096)
     p.add_argument("--attention-config", default="", help="JSON for vLLM attention_config (e.g. use_prefill_decode_attention)"); p.add_argument("--backend", default="", help="vLLM attention backend, e.g. TRITON_ATTN or FLASH_ATTN (S6: TRITON_ATTN only)")
@@ -50,6 +52,9 @@ def main():
     gen_max = 2 * args.tp_tokens if args.decode_timing else args.tp_tokens   # the 2N run of the decode split is the longest
     if args.throughput and args.tp_prompt_tokens + gen_max > args.max_model_len:
         p.error("prompt plus generation (2 x tp-tokens with --decode-timing) exceeds max-model-len")
+    lla = bool(args.lla_codec)
+    if lla != (args.lla_rank > 0) or (lla and (args.base or args.student or args.ref)):
+        p.error("--lla-codec and --lla-rank go together and exclude --base, --student and --ref (LLA is a throughput baseline)")
     ref = json.load(open(args.ref)) if args.ref else None
     if not ref and not args.throughput:
         p.error("provide a nonempty reference or request throughput")
@@ -76,7 +81,7 @@ def main():
         attach_engine_log(args.engine_log)
     from vllm import LLM, SamplingParams
     Path(args.out).mkdir(parents=True, exist_ok=True)
-    ovr = {"total_ut_steps": args.loops} if args.base else {"total_ut_steps": args.loops, "latent_student": args.student}
+    ovr = {"total_ut_steps": args.loops, **({"lla_codec": args.lla_codec, "lla_rank": args.lla_rank} if lla else {} if args.base else {"latent_student": args.student})}
     max_batched = max(8192, args.max_model_len)
     assert max_batched >= args.max_model_len, "full-prompt prefill needs max_num_batched_tokens >= max_model_len"
     llm = LLM(model=args.model, hf_overrides=ovr, trust_remote_code=True, dtype="bfloat16", **cc, enable_prefix_caching=False, enable_chunked_prefill=False, max_model_len=args.max_model_len,
@@ -86,11 +91,12 @@ def main():
     # Resolved engine config: an unset compilation mode becomes 3 (VLLM_COMPILE) and would inductor-compile the in-tree Ouro.
     comp = getattr(getattr(llm.llm_engine, "vllm_config", None), "compilation_config", None)
     mode = getattr(comp, "mode", None)
-    check = {"serving_path": "base" if args.base else "s6", "compile_mode": None if mode is None else int(mode), "cudagraph_mode": str(getattr(comp, "cudagraph_mode", None))}
+    check = {"serving_path": "base" if args.base else "lla" if lla else "s6", "compile_mode": None if mode is None else int(mode), "cudagraph_mode": str(getattr(comp, "cudagraph_mode", None))}
     print("COMPARE_RUNTIME_CHECK " + json.dumps(check), flush=True)
     res = {"prompt_chunk_size": 0, "loops": args.loops, "student": args.student, "serving_path": check["serving_path"], "backend": args.backend or "auto", "base": args.base,
            "compile_config": args.compile_config, "cudagraph_mode": cudagraph_mode(cc), "compile_mode": check["compile_mode"], "max_num_seqs": args.max_num_seqs,
-           "gpu_memory_utilization": args.gpu_mem, "max_model_len": args.max_model_len, "max_num_batched_tokens": max_batched, "logprobs_k": args.logprobs_k}
+           "gpu_memory_utilization": args.gpu_mem, "max_model_len": args.max_model_len, "max_num_batched_tokens": max_batched, "logprobs_k": args.logprobs_k,
+           "lla_codec": args.lla_codec, "lla_rank": args.lla_rank}
     if ref:
         sp = SamplingParams(temperature=0.0, max_tokens=args.max_new, logprobs=args.logprobs_k, ignore_eos=True)
         prompts = [{"prompt_token_ids": r["prompt_ids"]} for r in ref["prompts"]]

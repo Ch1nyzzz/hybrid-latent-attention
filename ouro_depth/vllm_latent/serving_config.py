@@ -21,15 +21,15 @@ _CONC = re.compile(r"Maximum concurrency for ([\d,]+) tokens per request: ([\d.]
 _CAPTURE = re.compile(r"Capturing CUDA graphs \(([^)]*)\)")
 _FINISHED = re.compile(r"Graph capturing finished in (\d+) secs, took ([\d.]+) GiB")
 _COMPARE_CHECK = re.compile(r"COMPARE_RUNTIME_CHECK (\{.*\})")
-RUNTIME_CHECK_MARKERS = ("S6_RUNTIME_CHECK", "S6_VLLM_OURO", "COMPARE_RUNTIME_CHECK")
+RUNTIME_CHECK_MARKERS = ("S6_RUNTIME_CHECK", "LLA_RUNTIME_CHECK", "S6_VLLM_OURO", "COMPARE_RUNTIME_CHECK")
 
 
 def resolve_backend(base: bool, backend: str) -> str:
-    """Base model: any backend (empty = vLLM default). S6: TRITON_ATTN only."""
+    """Base model: any backend (empty = vLLM default). S6 and LLA latent caches: TRITON_ATTN only."""
     if base:
         return backend
     if backend not in ("", S6_BACKEND):
-        raise ValueError(f"S6 adapter requires {S6_BACKEND} (paged latent cache layout)")
+        raise ValueError(f"latent-cache adapters require {S6_BACKEND} (paged latent cache layout)")
     return S6_BACKEND
 
 

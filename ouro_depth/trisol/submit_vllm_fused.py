@@ -4,6 +4,8 @@ python ouro_depth/trisol/submit_vllm_fused.py --dry-run          # build the bun
 python ouro_depth/trisol/submit_vllm_fused.py                    # upload + submit (run by the main agent, not workflows)
 python ouro_depth/trisol/submit_vllm_fused.py --code-version 5   # reuse an uploaded code version
 python ouro_depth/trisol/submit_vllm_fused.py --suite-args "--mode peak --skip-qualification"   # extra suite flags
+python ouro_depth/trisol/submit_vllm_fused.py --lla-codec-asset loop-lla-codec-0917:1 --name loop-lla-vllm-peak-0917 \
+    --suite-args "--mode peak --skip-qualification --gpu-tests --methods lla512,lla256,lla128,base"   # LLA absorb baseline sweep
 
 The version name defaults to vllm-fused-<first 8 hex of the archive sha256>, so changed code never reuses a name, and
 the upload passes --force-restart: an interrupted upload is never resumed with different content (pick a new --version).
@@ -26,7 +28,7 @@ BASE_MODEL = "ouro-1-4b:1"
 DATASET = "loop-scale-wheels-tf456:2"
 STUDENT_ASSET = "loop-s6-block-stage1-0916:1"
 ARCHIVE = "recipe-code.tar.gz"
-CODE_SLOT = "/trisol/input/models/model-1"   # second --model
+CODE_SLOT = "/trisol/input/models/model-1"   # second --model; an LLA codec asset (--lla-codec-asset) mounts third, at model-2
 EXCLUDED_DIRS = {"__pycache__", "results", "artifacts", "data", "runs", ".pytest_cache"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".log", ".pt", ".pth", ".safetensors", ".bin"}
 FORCED = ("ouro_depth/matheval/data/math500.jsonl",)
@@ -103,11 +105,12 @@ exec python ouro_depth/trisol/run_vllm_fused_suite.py --ouro-shim {shim}{extra}
 """
 
 
-def submit_argv(name: str, code_version, bootstrap: str, key: str) -> list[str]:
+def submit_argv(name: str, code_version, bootstrap: str, key: str, extra_models: tuple[str, ...] = ()) -> list[str]:
+    models = [STUDENT_ASSET, f"{ASSET}:{code_version}", *extra_models]   # mount order = model-0, model-1, ...
     return ["trisol", "train", "submit", name, "--team", TEAM, "--visibility", "team", "--description",
-            "Fused S6 latent-cache vLLM path: GPU ops tests, eager/FULL_DECODE_ONLY/FULL qualification vs HF with base control, base-vs-S6 throughput matrix or peak decode sweep (--suite-args)",
-            "--framework", "custom", "--mode", "full", "--base-model", BASE_MODEL, "--dataset", DATASET, "--model", STUDENT_ASSET,
-            "--model", f"{ASSET}:{code_version}", "--no-output-model", "--cluster", CLUSTER, "--gpu-model", "A100-SXM4-80GB", "--gpu-count", "8",
+            "Fused S6 latent-cache vLLM path: GPU ops tests, eager/FULL_DECODE_ONLY/FULL qualification vs HF with base control, base-vs-S6 (and LLA absorb baseline) throughput matrix or peak decode sweep (--suite-args)",
+            "--framework", "custom", "--mode", "full", "--base-model", BASE_MODEL, "--dataset", DATASET,
+            *(a for m in models for a in ("--model", m)), "--no-output-model", "--cluster", CLUSTER, "--gpu-model", "A100-SXM4-80GB", "--gpu-count", "8",
             "--image-ref", IMAGE, "--command", "bash", "--args=-lc", "--args=" + bootstrap, "--checkpoint-disable", "--backoff-limit", "0",
             "--idempotency-key", key, "--no-input", "-o", "json"]
 
@@ -142,6 +145,7 @@ def main(argv=None) -> int:
     p.add_argument("--ouro-shim", choices=["alias", "registry", "copy"], default="alias")
     p.add_argument("--version", default="", help="uploaded version name (default: vllm-fused-<archive sha256[:8]>)")
     p.add_argument("--suite-args", default="", help='appended to the run_vllm_fused_suite.py command, e.g. "--mode peak --skip-qualification"')
+    p.add_argument("--lla-codec-asset", default="", help="NAME:VERSION of the LLA codec model asset, mounted as the third --model (model-2) for lla<rank> methods")
     p.add_argument("--dry-run", action="store_true", help="build the bundle and print the argv; never upload or submit")
     args = p.parse_args(argv)
     dest = args.out_dir or Path("/tmp/vllm-fused-bundle")
@@ -149,7 +153,8 @@ def main(argv=None) -> int:
     bootstrap = bootstrap_script(manifest["archive_sha256"], args.ouro_shim, args.suite_args)
     (dest / "bootstrap.sh").write_text(bootstrap)
     version = args.code_version or "<version_code after upload>"
-    argv_submit = submit_argv(args.name, version, bootstrap, str(uuid.uuid4()))
+    extra = (args.lla_codec_asset,) if args.lla_codec_asset else ()
+    argv_submit = submit_argv(args.name, version, bootstrap, str(uuid.uuid4()), extra)
     (dest / "submit-argv.json").write_text(json.dumps(argv_submit))
     if args.dry_run:
         print(json.dumps({"dry_run": True, "bundle_dir": str(dest), "version": manifest["version"], "archive_sha256": manifest["archive_sha256"], "suite_args": args.suite_args,
@@ -163,7 +168,7 @@ def main(argv=None) -> int:
             print(up.stderr, file=sys.stderr, end="")
             return up.returncode
         version = extract_version_code(json.loads(up.stdout))
-        argv_submit = submit_argv(args.name, version, bootstrap, str(uuid.uuid4()))
+        argv_submit = submit_argv(args.name, version, bootstrap, str(uuid.uuid4()), extra)
         (dest / "submit-argv.json").write_text(json.dumps(argv_submit))
         print(json.dumps({"uploaded": f"{ASSET}:{version}", "version": manifest["version"]}), flush=True)
     sub = subprocess.run(argv_submit, capture_output=True, text=True)
