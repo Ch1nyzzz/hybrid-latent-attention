@@ -626,3 +626,25 @@ def test_base_stepper_matches_full_forward():
     stepper = BaseStepper(model)
     stepper.prefill(prompt)
     torch.testing.assert_close(stepper.step(prompt.new_tensor([[gen[0]]])), model(torch.cat([prompt, prompt.new_tensor([[gen[0]]])], 1)).logits[:, -1].float(), rtol=1e-5, atol=1e-6)
+
+
+def test_collect_vllm_suite_parses_prefixed_rows_and_peak_table(tmp_path, capsys):
+    from ouro_depth.trisol import collect_vllm_suite as collect
+    summary = {"label": "lla512-p128-peak", "stage": "peak-summary", "prompt": 128, "method": "lla512", "kv_cache_tokens": 150000, "c_max": 390, "gen_tokens": 128,
+               "peak_decode_tok_per_s": 4000.5, "peak_concurrency": 390, "sweep": [{"concurrency": 8, "decode_tok_per_s": 500.0, "end_to_end_tok_per_s": 490.0},
+                                                                               {"concurrency": 390, "decode_tok_per_s": 4000.5, "end_to_end_tok_per_s": 3900.0}], "problems": []}
+    case = {"label": "lla512-p128-c8-peak", "stage": "peak", "ok": True}
+    log = "(pod a) VLLM_SUITE_START {\"label\": \"x\"}\nVLLM_SUITE_CASE " + json.dumps(case) + "\n(pod a) VLLM_SUITE_CASE " + json.dumps(summary) + "\n"
+    log += "VLLM_SUITE_CASE " + json.dumps(case) + "\n" + "VLLM_SUITE_DONE {\"failed\": [], \"cases\": 2}\n"   # a repeated line (log re-fetch) counts once
+    cases, done = collect.parse_rows(log)
+    assert [c["label"] for c in cases] == ["lla512-p128-c8-peak", "lla512-p128-peak"] and done == {"failed": [], "cases": 2}
+    table = collect.peak_table(cases)
+    assert table == [{"prompt": 128, "method": "lla512", "kv_cache_tokens": 150000, "c_max": 390, "gen_tokens": 128, "peak_decode_tok_per_s": 4000.5,
+                      "peak_concurrency": 390, "sweep": [(8, 500.0, 490.0), (390, 4000.5, 3900.0)], "problems": []}]
+    assert "8:500.0 390:4000.5" in collect.format_table(table)
+    (tmp_path / "job.log").write_text(log)
+    assert collect.main(["--log", str(tmp_path / "job.log"), "--out", str(tmp_path / "r.json")]) == 0
+    assert json.loads((tmp_path / "r.json").read_text())["cases"] == cases and "peak=4000.5@390" in capsys.readouterr().out
+    assert collect.main(["--log", str(tmp_path / "job.log"), "--out", str(tmp_path / "r.json")]) == 0
+    (tmp_path / "empty.log").write_text("nothing\n")
+    assert collect.main(["--log", str(tmp_path / "empty.log"), "--out", str(tmp_path / "e.json")]) == 1
