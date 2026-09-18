@@ -1,8 +1,10 @@
 """Engine-configuration helpers shared by compare.py and matheval.py (pure Python, no vLLM/torch imports).
 
 Guarantees: S6 always runs on TRITON_ATTN (the paged latent cache layout depends on it); when a compilation config
-enables CUDA graphs, explicit `cudagraph_capture_sizes` cover the run's concurrency (vLLM's default maximum is
-min(max_num_seqs*2, 512) and larger batches silently run eager, compilation.py:703-705, cudagraph_dispatcher.py:249-256);
+enables CUDA graphs, explicit `cudagraph_capture_sizes` end at the run's concurrency itself (vLLM's default maximum is
+min(max_num_seqs*2, 512) and larger batches silently run eager, compilation.py:703-705, cudagraph_dispatcher.py:249-256;
+FULL decode graphs are registered only for sizes <= max_num_seqs, `cudagraph_dispatcher.initialize_cudagraph_keys` and
+`gpu_model_runner.capture_model`, so a batch padded to the next power of two above max_num_seqs would run eager);
 the eager configuration pins compilation mode 0 (an unset mode resolves to 3 = VLLM_COMPILE, compilation.py:447-452,
 which would inductor-compile the `@support_torch_compile`-decorated in-tree Ouro while the undecorated S6 adapter runs
 eager custom ops). compare.py prints the resolved mode as `COMPARE_RUNTIME_CHECK {...}` for the suite to verify.
@@ -32,13 +34,19 @@ def resolve_backend(base: bool, backend: str) -> str:
 
 
 def capture_sizes(concurrency: int) -> list[int]:
-    """Powers of two up to the first one >= concurrency, capped at MAX_CAPTURE_SIZE."""
+    """Powers of two below `concurrency` plus `concurrency` itself (capped at MAX_CAPTURE_SIZE, beyond which vLLM runs eager).
+
+    compare.py runs with max_num_seqs = concurrency and vLLM registers FULL decode graphs only for capture sizes
+    <= max_num_seqs, so the concurrency-way decode batch must find a graph of exactly its size: padded to the next
+    power of two it would have no key and fall back to eager (a different execution mode than the power-of-two batches).
+    """
     if concurrency < 1:
         raise ValueError("concurrency must be positive")
+    top = min(concurrency, MAX_CAPTURE_SIZE)
     sizes = [1]
-    while sizes[-1] < min(concurrency, MAX_CAPTURE_SIZE):
+    while sizes[-1] * 2 < top:
         sizes.append(sizes[-1] * 2)
-    return sizes
+    return sizes if sizes[-1] == top else sizes + [top]
 
 
 def compilation_kwargs(compile_config: str, concurrency: int) -> dict:
@@ -112,16 +120,39 @@ def topk_arrays(steps, k: int):
     return ids, lp
 
 
-def kv_capacity(kv_cache_tokens: int | None, seqs: int, tokens_per_seq: int) -> dict:
-    """Whether the engine's KV pool holds `seqs` sequences of `tokens_per_seq` tokens at once (block rounding ignored).
+def kv_capacity(kv_cache_tokens: int | None, seqs: int, tokens_per_seq: int, block_size: int = 16) -> dict:
+    """Whether the engine's KV pool holds `seqs` sequences of `tokens_per_seq` tokens at once, in whole `block_size`-token
+    blocks (vLLM V1 keeps block 0 as the null block, so one block of the logged pool is never allocated).
 
     Below capacity vLLM V1 admits only part of the batch and preempts/recomputes the rest, so a timed run is not a
     `seqs`-way decode. `kv_fits` is None when the pool size is unknown (no engine log).
     """
-    need = seqs * tokens_per_seq
-    known = kv_cache_tokens is not None
-    return {"kv_cache_tokens": kv_cache_tokens, "required_kv_tokens": need, "kv_fits": kv_cache_tokens >= need if known else None,
-            "max_fitting_concurrency": kv_cache_tokens // tokens_per_seq if known else None}
+    blocks_per_seq = -(-tokens_per_seq // block_size)
+    fit = max(0, (kv_cache_tokens // block_size - 1) // blocks_per_seq) if kv_cache_tokens is not None else None
+    return {"kv_cache_tokens": kv_cache_tokens, "required_kv_tokens": seqs * blocks_per_seq * block_size,
+            "kv_fits": None if fit is None else seqs <= fit, "max_fitting_concurrency": fit}
+
+
+def over_capacity_message(tp: dict) -> str:
+    """Why a throughput row whose pool cannot hold its whole batch (`kv_capacity` keys plus `seqs`) measured queueing."""
+    seqs = tp["seqs"]
+    return (f"KV pool {tp['kv_cache_tokens']} tokens (one null block reserved) holds at most {tp['max_fitting_concurrency']} sequences of "
+            f"{tp['required_kv_tokens'] // seqs} block-rounded tokens, not {seqs}: queued/preempted, not a {seqs}-way decode")
+
+
+def ramp_steps(seqs: int, prompt_len: int, max_batched: int) -> int:
+    """Steps vLLM V1 needs to admit `seqs` equal prompts: each step schedules the running decodes first (one token each)
+    and then whole prompts (no chunking) into the budget left, so a step admits (max_batched - running) // prompt_len.
+    Raises ValueError when the running decodes leave no room for a prompt (the scheduler would stall until they finish)."""
+    if prompt_len < 1:
+        raise ValueError("prompt length must be positive")
+    steps = running = 0
+    while running < seqs:
+        admit = (max_batched - running) // prompt_len
+        if admit < 1:
+            raise ValueError(f"{running} running decodes leave no room for a {prompt_len}-token prompt in the {max_batched}-token budget")
+        running += min(admit, seqs - running); steps += 1
+    return steps
 
 
 def decode_rates(seqs: int, tokens_per_seq: int, first_seconds: float, n_seconds: float, double_seconds: float, generated_tokens: int) -> dict:
@@ -129,8 +160,8 @@ def decode_rates(seqs: int, tokens_per_seq: int, first_seconds: float, n_seconds
 
     vLLM V1 admits waiting prefills into the token budget left by running decodes, so an N-token run is a staircase
     (later requests prefill while earlier ones decode) followed by a shrinking tail. The 2N run repeats that ramp-up
-    and tail exactly and adds N steps in which all `seqs` sequences decode together, provided the ramp-up (at most
-    `seqs` steps, one admission per step) fits inside the first N tokens: callers assert `tokens_per_seq >= seqs`.
+    and tail exactly and adds N steps in which all `seqs` sequences decode together, provided the ramp-up fits inside
+    the first N tokens: callers assert `tokens_per_seq >= ramp_steps(seqs, prompt_len, max_num_batched_tokens)`.
     """
     plateau = double_seconds - n_seconds
     return {"prefill_seconds": round(first_seconds, 3), "seconds_n": round(n_seconds, 3), "seconds_2n": round(double_seconds, 3),

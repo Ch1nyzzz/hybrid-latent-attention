@@ -31,9 +31,12 @@ def test_backend_rules():
         sc.resolve_backend(False, "FLASH_ATTN")
 
 
-def test_capture_sizes_cover_concurrency():
-    assert sc.capture_sizes(1) == [1] and sc.capture_sizes(8) == [1, 2, 4, 8] and sc.capture_sizes(33) == [1, 2, 4, 8, 16, 32, 64]
-    assert sc.capture_sizes(128)[-1] == 128 and sc.capture_sizes(10000)[-1] == 512
+def test_capture_sizes_end_at_the_concurrency():
+    """vLLM registers FULL decode graphs only for sizes <= max_num_seqs (= the concurrency): the top size is the concurrency itself, never the next power of two."""
+    assert sc.capture_sizes(1) == [1] and sc.capture_sizes(8) == [1, 2, 4, 8] and sc.capture_sizes(33) == [1, 2, 4, 8, 16, 32, 33]
+    assert sc.capture_sizes(10) == [1, 2, 4, 8, 10] and sc.capture_sizes(227) == [1, 2, 4, 8, 16, 32, 64, 128, 227] and sc.capture_sizes(128)[-1] == 128
+    assert sc.capture_sizes(2379) == sc.capture_sizes(512) == sc.capture_sizes(10000) == [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]   # beyond 512: eager, per spec
+    assert all(sc.capture_sizes(c)[-1] == c and len(set(sc.capture_sizes(c))) == len(sc.capture_sizes(c)) for c in range(1, 513))
     with pytest.raises(ValueError):
         sc.capture_sizes(0)
 
@@ -89,12 +92,27 @@ def test_decode_rates_use_the_n_to_2n_plateau():
     assert sc.decode_rates(8, 128, 2.0, 10.0, 10.0, 1024)["decode_tok_per_s"] is None
 
 
-def test_kv_capacity():
+def test_kv_capacity_is_block_aware():
     assert sc.kv_capacity(85000, 128, 8448) == {"kv_cache_tokens": 85000, "required_kv_tokens": 1081344, "kv_fits": False, "max_fitting_concurrency": 10}
     assert sc.kv_capacity(85000, 8, 8448)["kv_fits"] and sc.kv_capacity(None, 8, 8448) == {"kv_cache_tokens": None, "required_kv_tokens": 67584, "kv_fits": None, "max_fitting_concurrency": None}
+    # 1000 tokens = 62 blocks, one of them vLLM's null block; 17 tokens occupy 2 blocks: 61 // 2 = 30 sequences, 32 tokens each
+    assert sc.kv_capacity(1000, 30, 17) == {"kv_cache_tokens": 1000, "required_kv_tokens": 960, "kv_fits": True, "max_fitting_concurrency": 30}
+    assert not sc.kv_capacity(1000, 31, 17)["kv_fits"] and sc.kv_capacity(1000, 1, 17, block_size=1)["max_fitting_concurrency"] == 58
+    assert sc.kv_capacity(8, 1, 16)["max_fitting_concurrency"] == 0 and not sc.kv_capacity(8, 1, 16)["kv_fits"]
+    assert sc.kv_capacity(913728, 1, 384)["max_fitting_concurrency"] == 2379 and sc.kv_capacity(87536, 1, 8448)["max_fitting_concurrency"] == 10   # A100 pools of the finished run
     unknown, over, fits = sc.kv_capacity(None, 8, 8448), sc.kv_capacity(85000, 128, 8448), sc.kv_capacity(85000, 8, 8448)
     assert sc.decode_split_allowed(fits, "/l.log") and sc.decode_split_allowed(unknown, "")   # no log at all: nothing to consult
     assert not sc.decode_split_allowed(unknown, "/l.log") and not sc.decode_split_allowed(over, "/l.log") and not sc.decode_split_allowed(over, "")
+
+
+def test_ramp_steps_follow_the_token_budget():
+    assert sc.ramp_steps(8, 128, 8192) == 1 and sc.ramp_steps(64, 128, 8192) == 1 and sc.ramp_steps(65, 128, 8192) == 2 and sc.ramp_steps(0, 128, 8192) == 0
+    assert sc.ramp_steps(2200, 128, 8192) == 41 and sc.ramp_steps(700, 1024, 8192) == 100 and sc.ramp_steps(105, 8192, 8448) == 105
+    assert sc.ramp_steps(210, 4096, 8192) == 209   # two prompts fill the first step, then the running decodes leave room for one per step
+    with pytest.raises(ValueError):
+        sc.ramp_steps(110, 8192, 8300)   # 109 running decodes leave 8191 tokens: no prompt fits, the scheduler stalls
+    with pytest.raises(ValueError):
+        sc.ramp_steps(1, 0, 8192)
 
 
 def test_attach_engine_log_captures_child_output(tmp_path):
@@ -248,6 +266,8 @@ def test_argv_builders():
     assert json.loads(suite.FULL)["mode"] == 0 and suite.COMMON_ENV["VLLM_LOGGING_LEVEL"] == "INFO" and suite.COMMON_ENV["VLLM_CONFIGURE_LOGGING"] == "1"
     base = suite.tp_compare_argv("base", 128, 1, Path("/o"), Path("/l.log"), "py")
     assert "--base" in base and "--backend" not in base and "--student" not in base
+    longer = suite.tp_compare_argv("s6", 4096, 202, Path("/o"), Path("/l.log"), "py", 208)
+    assert longer[longer.index("--tp-tokens") + 1] == "208" and longer[longer.index("--max-model-len") + 1] == "4512" and longer[longer.index("--max-num-seqs") + 1] == "202"
     q = suite.qual_compare_argv("s6", Path("/ref.json"), Path("/o"), Path("/l.log"), suite.FULL, "py")
     assert q[q.index("--ref") + 1] == "/ref.json" and q[q.index("--max-new") + 1] == "64" and q[-2:] == ["--compile-config", suite.FULL] and q[q.index("--logprobs-k") + 1] == "4096"
     assert "--compile-config" not in suite.qual_compare_argv("base", Path("/r"), Path("/o"), Path("/l"), "", "py")
@@ -288,13 +308,98 @@ def test_engine_log_and_result_checks():
     assert suite.stream_problems(bad) == ["prompt 1: matching_prefix 63/64"] and suite.streams_identical(ok, bad) == ["2"]
     assert suite.trimmed({"compare": [1], "summary": {}}) == {"summary": {}}
     over = {"throughput": {"seqs": 128, "kv_fits": False, "kv_cache_tokens": 85000, "required_kv_tokens": 1081344, "max_fitting_concurrency": 10}}
-    assert suite.capacity_problems(over) == ["KV pool 85000 tokens < 1081344 needed for concurrency 128 (at most 10 fit): queued/preempted, not a 128-way decode"]
+    assert suite.capacity_problems(over) == ["KV pool 85000 tokens (one null block reserved) holds at most 10 sequences of 8448 block-rounded tokens, not 128: queued/preempted, not a 128-way decode"]
+    null_gap = {"throughput": {"seqs": 228, **sc.kv_capacity(87552, 228, 384)}}   # the null block is the only gap: no `pool < needed` inequality
+    assert suite.capacity_problems(null_gap) == ["KV pool 87552 tokens (one null block reserved) holds at most 227 sequences of 384 block-rounded tokens, not 228: queued/preempted, not a 228-way decode"]
     assert suite.capacity_problems({"throughput": {"kv_fits": True}}) == [] and suite.capacity_problems({}) == []
     assert suite.capacity_problems({"throughput": {"kv_fits": None, "seqs": 8}}) == ["KV pool size not found in the engine log: concurrency 8 unverified, decode split skipped"]
     rows = [{"label": "q-ok", "ok": True, "experimental": False}, {"label": "q-bad", "ok": False, "experimental": False},
             {"label": "s6-full-compare", "ok": False, "experimental": True}, {"label": "base-p8192-c128", "ok": False, "experimental": False, "stage": "throughput"},
-            {"label": "s6-p8192-c128", "ok": False, "experimental": True, "stage": "throughput"}]
-    assert suite.outcome(rows) == {"failed": ["q-bad"], "throughput_failed": ["base-p8192-c128"], "experimental_failed": ["s6-full-compare", "s6-p8192-c128"], "cases": 5}
+            {"label": "s6-p8192-c128", "ok": False, "experimental": True, "stage": "throughput"},
+            {"label": "base-p8192-c10-peak", "ok": False, "experimental": False, "stage": "peak"}, {"label": "base-p8192-peak", "ok": False, "experimental": False, "stage": "peak-summary"}]
+    assert suite.outcome(rows) == {"failed": ["q-bad"], "throughput_failed": ["base-p8192-c128", "base-p8192-c10-peak", "base-p8192-peak"],
+                                   "experimental_failed": ["s6-full-compare", "s6-p8192-c128"], "cases": 7}
+
+
+def test_peak_planning():
+    units = suite.peak_units(range(8))   # both methods of a prompt back-to-back on one GPU, prompts round-robin
+    assert [(u["prompt"], u["method"], u["gpu"]) for u in units] == [(p, m, g) for g, p in enumerate((128, 1024, 4096, 8192)) for m in ("base", "s6")]
+    assert units[0]["label"] == "base-p128-peak" and [u["gpu"] for u in suite.peak_units(range(1, 8))] == [1, 1, 2, 2, 3, 3, 4, 4]
+    assert [u["gpu"] for u in suite.peak_units(range(1, 3))] == [1, 1, 2, 2, 1, 1, 2, 2]
+    sweeps = {10: [10], 20: [16, 20], 65: [16, 32, 65], 105: [16, 32, 64, 105], 210: [16, 32, 64, 128, 210], 220: [16, 32, 64, 128, 220],
+              700: [16, 32, 64, 128, 256, 512, 700], 2200: [16, 32, 64, 128, 256, 512, 1024, 2200]}
+    assert {c: suite.sweep_concurrencies(c) for c in sweeps} == sweeps
+    assert suite.sweep_concurrencies(8) == [] and suite.sweep_concurrencies(5) == [5] and suite.sweep_concurrencies(0) == [] and suite.sweep_concurrencies(16) == [16]
+    assert all(max(suite.sweep_concurrencies(c)) == c for c in sweeps)
+    # A100 pools of the finished run: N stays 128 unless the ramp-up of c_max needs more (S6 p4096: 209 steps for 209 seqs at N=128)
+    assert suite.peak_plan(128, 913728) == (2379, 128) and suite.peak_plan(1024, 913728) == (713, 128) and suite.peak_plan(8192, 913152) == (108, 128)
+    c, gen = suite.peak_plan(4096, 913728)
+    assert (c, gen) == (202, 208) and sc.ramp_steps(c, 4096, 8192) <= gen and sc.kv_capacity(913728, c, 4096 + 2 * gen)["kv_fits"]
+    assert suite.peak_plan(128, 87552) == (227, 128) and suite.peak_plan(4096, 87552) == (20, 128) and suite.peak_plan(8192, 87536) == (10, 128)
+    assert suite.peak_plan(128, 10 ** 9)[0] == 8192 - 128 + 1   # a huge pool: the token budget beside the running decodes caps the batch
+    assert suite.peak_plan(8192, 16 * 16)[0] == 0
+
+
+def test_peak_summary_counts_clean_decode_rows_only():
+    row = lambda c, ok=True, **tp: {"concurrency": c, "ok": ok, "result": {"throughput": {"tok_per_s": 1.0, "kv_fits": True, "tokens_per_seq": 128, **tp}}}
+    rows = [row(8, decode_timing={"decode_tok_per_s": 300.0, "prefill_seconds": 0.5}), row(16, decode_timing={"decode_tok_per_s": 500.0, "prefill_seconds": 0.6}),
+            row(32, ok=False, decode_timing={"decode_tok_per_s": 900.0, "prefill_seconds": 0.7}),   # failed a runtime check: listed, not the peak
+            row(64, ok=False, kv_fits=False, decode_timing=None), {"concurrency": 128, "ok": False, "exit_code": 1}]
+    s = suite.peak_summary(rows)
+    assert s["peak_decode_tok_per_s"] == 500.0 and s["peak_concurrency"] == 16 and [t["concurrency"] for t in s["sweep"]] == [8, 16, 32, 64, 128]
+    assert s["sweep"][0] == {"concurrency": 8, "gen_tokens": 128, "decode_tok_per_s": 300.0, "end_to_end_tok_per_s": 1.0, "prefill_seconds": 0.5, "kv_fits": True, "ok": True}
+    assert s["sweep"][3]["kv_fits"] is False and s["sweep"][4] == {"concurrency": 128, "gen_tokens": None, "decode_tok_per_s": None, "end_to_end_tok_per_s": None, "prefill_seconds": None, "kv_fits": None, "ok": False}
+    assert suite.peak_summary([]) == {"sweep": [], "peak_decode_tok_per_s": None, "peak_concurrency": None}
+
+
+def test_retry_concurrency_follows_the_top_case_pool():
+    row = lambda c, fits, cap: {"concurrency": c, "result": {"throughput": {"kv_fits": fits, "max_fitting_concurrency": cap}}}
+    assert suite.retry_concurrency([row(8, True, 2379), row(1024, True, 2379), row(2379, False, 2266)]) == 2266
+    assert suite.retry_concurrency([row(8, True, 2379), row(1024, True, 2379), row(2379, False, 1024)]) == 0   # nothing above a batch that fit
+    assert suite.retry_concurrency([row(8, True, 2379), row(2379, True, 2379)]) == 0 and suite.retry_concurrency([row(8, True, 10), row(10, False, 0)]) == 0
+    assert suite.retry_concurrency([row(8, None, None), {"concurrency": 16, "exit_code": 1}]) == 0 and suite.retry_concurrency([]) == 0
+
+
+def test_peak_sweep_flow(tmp_path, monkeypatch):
+    """Probe -> pool -> plan -> sweep -> retry -> summary with a stand-in compare.py reporting the A100 pools of the finished run
+    (the S6 pool shrinks with max_num_seqs, as the engine's profile run does)."""
+    capture = "Capturing CUDA graphs (FULL)\nGraph capturing finished in 1 secs, took 0.05 GiB\n"
+
+    def fake_argv(method, prompt, c, out, log, python=sys.executable, gen_tokens=suite.GEN_TOKENS):
+        kv = {128: None, 1024: 256}.get(prompt, {"base": 87552, "s6": 913728 - 40 * c}[method])   # p128: a log without the KV line; p1024: a pool below one batch
+        cap = sc.kv_capacity(kv, c, prompt + 2 * gen_tokens)
+        doc = {"student": "" if method == "base" else suite.STUDENT, "throughput": {"seqs": c, "tok_per_s": float(c), "tokens_per_seq": gen_tokens, **cap,
+                                                                                    "decode_timing": {"decode_tok_per_s": 10.0 * c, "prefill_seconds": 0.1} if cap["kv_fits"] else None}}
+        lines = MODE0 + capture + ("" if method == "base" else "S6_VLLM_OURO alias\nS6_RUNTIME_CHECK {}\n")
+        code = f"import json, pathlib; p = pathlib.Path({str(out)!r}); p.mkdir(parents=True, exist_ok=True); (p / 'compare.json').write_text(json.dumps({doc!r})); print({lines!r})"
+        return [sys.executable, "-c", code]
+    monkeypatch.setattr(suite, "tp_compare_argv", fake_argv)
+    r = suite.Runner(NS(root=Path(__file__).resolve().parents[2], ouro_shim="alias", timeout=60, out=tmp_path))
+    suite.peak(r, {"label": "base-p8192-peak", "prompt": 8192, "method": "base", "gpu": 0})
+    assert [x["label"] for x in r.rows] == ["base-p8192-c8-peak", "base-p8192-c10-peak", "base-p8192-peak"] and all(x["ok"] for x in r.rows)
+    assert "c_max" not in r.rows[0] and r.rows[0]["gen_tokens"] == 128 and r.rows[1]["c_max"] == 10 and r.rows[1]["gen_tokens"] == 128 and r.rows[1]["stage"] == "peak"
+    s = r.rows[-1]
+    assert s["stage"] == "peak-summary" and s["kv_cache_tokens"] == 87552 and s["method"] == "base" and s["prompt"] == 8192
+    assert (s["c_max"], s["gen_tokens"], s["peak_concurrency"], s["peak_decode_tok_per_s"]) == (10, 128, 10, 100.0) and [t["concurrency"] for t in s["sweep"]] == [8, 10]
+    assert s["retry_concurrency"] == 0 and "retry" not in r.rows[1]
+    r.rows.clear()
+    suite.peak(r, {"label": "s6-p4096-peak", "prompt": 4096, "method": "s6", "gpu": 1})   # c_max=202 from the probe's pool; at max_num_seqs=202 only 200 fit
+    assert [x["concurrency"] for x in r.rows[:-1]] == [8, 16, 32, 64, 128, 202, 200] and r.rows[-1]["gen_tokens"] == 208 and r.rows[-1]["c_max"] == 202
+    assert r.rows[5]["capacity_limited"] and r.rows[5]["experimental"] and not r.rows[5]["ok"] and r.rows[6]["retry"] and r.rows[6]["ok"] and "retry" not in r.rows[5]
+    assert (r.rows[-1]["retry_concurrency"], r.rows[-1]["peak_concurrency"], r.rows[-1]["peak_decode_tok_per_s"]) == (200, 200, 2000.0)
+    assert [t["kv_fits"] for t in r.rows[-1]["sweep"]] == [True] * 5 + [False, True] and all(x["gpu"] == 1 for x in r.rows[:-1]) and r.rows[-1]["ok"]
+    assert [t["gen_tokens"] for t in r.rows[-1]["sweep"]] == [128] + [208] * 6 and r.rows[0]["gen_tokens"] == 128   # the probe keeps N=128, the sweep runs the raised N
+    assert suite.outcome(r.rows) == {"failed": [], "throughput_failed": [], "experimental_failed": ["s6-p4096-c202-peak"], "cases": 8}
+    r.rows.clear()
+    suite.peak(r, {"label": "base-p1024-peak", "prompt": 1024, "method": "base", "gpu": 3})   # pool below one batch: even the probe is over capacity, no peak
+    assert [x["label"] for x in r.rows] == ["base-p1024-c8-peak", "base-p1024-peak"] and r.rows[0]["capacity_limited"] and r.rows[1]["c_max"] == 0
+    assert r.rows[1]["problems"] == ["no clean decode row in the sweep: peak unknown"] and not r.rows[1]["ok"] and r.rows[1]["peak_concurrency"] is None
+    assert suite.outcome(r.rows) == {"failed": [], "throughput_failed": ["base-p1024-peak"], "experimental_failed": ["base-p1024-c8-peak"], "cases": 2}
+    r.rows.clear()
+    suite.peak(r, {"label": "s6-p128-peak", "prompt": 128, "method": "s6", "gpu": 2})   # unknown pool: the probe is flagged, the sweep skipped
+    assert [x["label"] for x in r.rows] == ["s6-p128-c8-peak", "s6-p128-peak"] and not r.rows[0]["ok"] and not r.rows[1]["ok"]
+    assert r.rows[1]["problems"] == ["c=8 probe did not report the KV pool size: sweep skipped"] and r.rows[1]["peak_concurrency"] is None and "c_max" not in r.rows[1]
+    assert suite.outcome(r.rows)["failed"] == [] and suite.outcome(r.rows)["throughput_failed"] == ["s6-p128-c8-peak", "s6-p128-peak"]
 
 
 def test_noise_floor_identical_distributions_pass():
@@ -310,7 +415,16 @@ def test_suite_dry_run_prints_plan(tmp_path, capsys):
     assert suite.main(["--dry-run", "--out", str(tmp_path), "--gpus", "4"]) == 0
     plan = json.loads(capsys.readouterr().out)
     assert len(plan["throughput"]) == 16 and {c["gpu"] for c in plan["throughput"]} == {1, 2, 3} and len(plan["qualification"]) == 3
-    assert all(len(c["argv"]) == 2 for c in plan["throughput"])
+    assert all(len(c["argv"]) == 2 for c in plan["throughput"]) and "peak" not in plan
+    assert suite.main(["--dry-run", "--out", str(tmp_path), "--mode", "peak", "--skip-qualification"]) == 0
+    peak = json.loads(capsys.readouterr().out)
+    assert "throughput" not in peak and [u["gpu"] for u in peak["peak"]] == [0, 0, 1, 1, 2, 2, 3, 3] and all(u["probe_argv"][u["probe_argv"].index("--throughput") + 1] == "8" for u in peak["peak"])
+    assert suite.main(["--dry-run", "--out", str(tmp_path), "--mode", "both"]) == 0
+    both = json.loads(capsys.readouterr().out)
+    assert len(both["throughput"]) == 16 and [u["gpu"] for u in both["peak"]] == [1, 1, 2, 2, 3, 3, 4, 4]
+    assert suite.main(["--dry-run", "--out", str(tmp_path), "--gpus", "1", "--mode", "both"]) == 0   # GPU 0 qualifies alone: nothing to plan for throughput
+    alone = json.loads(capsys.readouterr().out)
+    assert alone["throughput"] == [] and alone["peak"] == [] and len(alone["qualification"]) == 3
 
 
 def test_runner_records_failures_verbatim(tmp_path, capsys):
@@ -411,6 +525,8 @@ def test_bootstrap_and_submit_argv(tmp_path):
     assert "IMAGE_SITECUSTOMIZE" in boot and "import pytest" in boot
     (tmp_path / "boot.sh").write_text(boot)
     assert subprocess.run(["bash", "-n", str(tmp_path / "boot.sh")]).returncode == 0
+    peak = submit.bootstrap_script("ab" * 32, "alias", "--mode peak --skip-qualification --out '/o/p k'")
+    assert peak.rstrip().endswith("run_vllm_fused_suite.py --ouro-shim alias --mode peak --skip-qualification --out '/o/p k'")
     argv = submit.submit_argv("job", 9, boot, "key")
     assert argv[:4] == ["trisol", "train", "submit", "job"] and argv[argv.index("--team") + 1] == "hal9k-metis"
     assert argv[argv.index("--cluster") + 1] == "2071581637107265536" and argv[argv.index("--image-ref") + 1].endswith("verl-coding:202608292148")
@@ -434,9 +550,10 @@ def test_submit_dry_run_never_calls_trisol(tmp_path, monkeypatch, capsys):
         assert argv[0] != "trisol", "dry run must not invoke trisol"
         return real(argv, *a, **k)
     monkeypatch.setattr(submit.subprocess, "run", guarded)
-    assert submit.main(["--dry-run", "--root", str(root), "--out-dir", str(tmp_path / "out"), "--code-version", "3"]) == 0
+    assert submit.main(["--dry-run", "--root", str(root), "--out-dir", str(tmp_path / "out"), "--code-version", "3", "--suite-args", "--mode peak --skip-qualification"]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["dry_run"] and out["files"] == 4 and "loop-s6-math-code-0917:3" in out["submit_argv"]
+    assert out["dry_run"] and out["files"] == 4 and "loop-s6-math-code-0917:3" in out["submit_argv"] and out["suite_args"] == "--mode peak --skip-qualification"
+    assert (tmp_path / "out" / "bootstrap.sh").read_text().rstrip().endswith("--ouro-shim alias --mode peak --skip-qualification")
     assert out["version"] == f"vllm-fused-{out['archive_sha256'][:8]}" and out["upload_argv"][out["upload_argv"].index("--version") + 1] == out["version"]
     assert (tmp_path / "out" / "bootstrap.sh").exists() and json.loads((tmp_path / "out" / "submit-argv.json").read_text()) == out["submit_argv"]
 

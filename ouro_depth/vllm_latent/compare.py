@@ -2,7 +2,7 @@
 first-token logprobs after prefill, greedy token streams, top-K logprobs per generated position (vllm_logprobs.npz for
 the fixed-prefix KL gate), and a throughput probe with optional prefill/decode split timing (1-, N- and 2N-token runs;
 the decode rate is the N full-concurrency steps between the N and 2N runs, only when the engine's KV pool holds the
-whole batch). Runs inside the vLLM image."""
+whole batch in whole blocks and the admission ramp-up ends inside the N-token run). Runs inside the vLLM image."""
 from __future__ import annotations
 
 import argparse, json, sys, time
@@ -11,7 +11,7 @@ from pathlib import Path
 import torch
 
 from .serving_config import (attach_engine_log, compilation_kwargs, cudagraph_mode, decode_rates, decode_split_allowed, kv_capacity,
-                             parse_engine_log, resolve_backend, topk_arrays)
+                             over_capacity_message, parse_engine_log, ramp_steps, resolve_backend, topk_arrays)
 
 
 def throughput_prompt_ids(tok, target: int) -> list[int]:
@@ -50,8 +50,6 @@ def main():
     gen_max = 2 * args.tp_tokens if args.decode_timing else args.tp_tokens   # the 2N run of the decode split is the longest
     if args.throughput and args.tp_prompt_tokens + gen_max > args.max_model_len:
         p.error("prompt plus generation (2 x tp-tokens with --decode-timing) exceeds max-model-len")
-    if args.decode_timing and args.tp_tokens < args.throughput:
-        p.error("--decode-timing needs tp-tokens >= throughput (the prefill ramp-up, at most one admission per step, must end inside the N-token run)")
     ref = json.load(open(args.ref)) if args.ref else None
     if not ref and not args.throughput:
         p.error("provide a nonempty reference or request throughput")
@@ -133,6 +131,13 @@ def main():
         ids = throughput_prompt_ids(tok, args.tp_prompt_tokens)
         if len(ids) + gen_max > args.max_model_len:
             p.error("prompt plus generation exceeds max-model-len")
+        if args.decode_timing:   # the admission ramp-up (whole prompts into the budget left by running decodes) must end inside the N-token run
+            try:
+                ramp = ramp_steps(args.throughput, len(ids), max_batched)
+            except ValueError as e:
+                p.error(str(e))
+            if args.tp_tokens < ramp:
+                p.error(f"--decode-timing needs tp-tokens >= {ramp}: admitting {args.throughput} prompts of {len(ids)} tokens takes {ramp} steps under a {max_batched}-token budget")
         prompts = [{"prompt_token_ids": ids} for _ in range(args.throughput)]
         # KV pool from the engine's own log line: below capacity vLLM admits part of the batch and preempts/recomputes
         # the rest, so the run is recorded (end-to-end) but not split into a decode rate labelled with this concurrency;
@@ -155,8 +160,7 @@ def main():
         if split:
             res["throughput"]["decode_timing"] = decode_rates(args.throughput, args.tp_tokens, t_first, dt, timed(2 * args.tp_tokens)[1], ntok)
         elif args.decode_timing:
-            res["throughput"]["decode_timing_skipped"] = ("KV pool size not found in the engine log" if kv is None else
-                                                          f"KV pool {kv} tokens < {capacity['required_kv_tokens']} needed: queued/preempted, not a {args.throughput}-way decode")
+            res["throughput"]["decode_timing_skipped"] = "KV pool size not found in the engine log" if kv is None else over_capacity_message(res["throughput"])
         print(json.dumps({"TP": res["throughput"]}), flush=True)
     if args.engine_log:
         sys.stdout.flush(); sys.stderr.flush()

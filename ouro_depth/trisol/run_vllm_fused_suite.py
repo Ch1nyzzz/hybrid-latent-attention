@@ -2,9 +2,16 @@
 
 GPU 0 runs the qualification chain sequentially (GPU ops tests, HF S6 reference, vLLM S6 eager / FULL_DECODE_ONLY /
 FULL(experimental) compare + fixed-prefix qualification, HF base reference + vLLM base control, HF-base-vs-HF-S6 noise
-floor). GPUs 1-7 run the throughput matrix (prompt x concurrency x {base, s6}) round-robin, both methods of a case
-back-to-back on the same GPU. Every case is an independent subprocess with a timeout; rows are printed as
-`VLLM_SUITE_CASE {...}` and collected in <out>/all-results.json; `VLLM_SUITE_DONE {...}` ends the run.
+floor). GPUs 1-7 (all 8 with --skip-qualification) run the throughput stage: `--mode matrix` (default) is the fixed
+matrix (prompt x concurrency x {base, s6}) round-robin, both methods of a case back-to-back on the same GPU; `--mode peak`
+sweeps one unit per (prompt, method), prompts round-robin over the GPUs with both methods of a prompt back-to-back on the
+same GPU, the concurrency from a c=8 probe (its engine log gives the KV pool) up to the largest batch the pool holds
+(`peak_plan`: block-aware capacity, N raised above GEN_TOKENS only when the admission ramp-up of that batch needs it).
+The engine profiles with max_num_seqs sequences, so a huge batch can shrink the pool below the probe's: a top case that
+reports itself over capacity is retried once at the concurrency its own pool holds (`retry_concurrency`). Each unit ends
+in a `peak-summary` row with the sweep table and the peak decode tok/s; `--mode both` runs the matrix and then the sweep.
+Every case is an independent subprocess with a timeout; rows are printed as `VLLM_SUITE_CASE {...}` and collected in
+<out>/all-results.json; `VLLM_SUITE_DONE {...}` ends the run.
 
 S6 subprocesses import the adapter through the sitecustomize shim (`ouro_depth/vllm_latent/s6_sitecustomize.py` copied
 to /work/s6shim, PYTHONPATH + S6_VLLM_OURO), so the installed vLLM package is never modified and base subprocesses in
@@ -18,14 +25,14 @@ and an unset mode resolves to 3 (VLLM_COMPILE), which would inductor-compile the
 adapter runs eager custom ops. CUDA graphs come from `cudagraph_mode` alone (the runner wraps the model in
 CUDAGraphWrapper(FULL) regardless of the mode); every compare log must carry compare.py's `COMPARE_RUNTIME_CHECK` line
 with the resolved mode and, under CUDA graphs, a `Capturing CUDA graphs (FULL)` capture plus `Graph capturing finished` for both methods.
-Only qualification rows decide the exit code; throughput failures are reported apart (`throughput_failed`).
+Only qualification rows decide the exit code; throughput and peak failures are reported apart (`throughput_failed`).
 """
 from __future__ import annotations
 
 import argparse, concurrent.futures, json, os, re, shutil, signal, subprocess, sys, threading, time
 from pathlib import Path
 
-from ouro_depth.vllm_latent.serving_config import compare_runtime_check, parse_engine_log
+from ouro_depth.vllm_latent.serving_config import compare_runtime_check, kv_capacity, over_capacity_message, parse_engine_log, ramp_steps
 
 MODEL = "/trisol/input/model"
 STUDENT = "/trisol/input/models/model-0/student-600.pt"
@@ -35,6 +42,8 @@ SHIM_DIR = "/work/s6shim"
 PROMPTS = (128, 1024, 4096, 8192)
 CONCURRENCY = (1, 8, 32, 128)
 GEN_TOKENS = 128
+PEAK_PROBE = 8            # the sweep's first case: its engine log gives the KV pool size
+PEAK_STAGES = ("throughput", "peak", "peak-summary")
 MAX_NEW = 64
 LOGPROBS_K = 4096
 FDO = '{"cudagraph_mode":"FULL_DECODE_ONLY","mode":0}'
@@ -61,12 +70,74 @@ def case_env(kind: str, gpu: int, root: str, shim: str, base_env: dict, cache_ro
 
 
 def throughput_cases(gpus=range(1, 8)) -> list[dict]:
+    """The fixed matrix round-robin over `gpus` (no GPUs: no cases), both methods of a case back-to-back on its GPU."""
     gpus = list(gpus)
-    cases = []
-    for i, (prompt, conc) in enumerate((p, c) for p in PROMPTS for c in CONCURRENCY):
-        cases.append({"label": f"p{prompt}-c{conc}", "prompt": prompt, "concurrency": conc, "gpu": gpus[i % len(gpus)],
-                      "methods": ["base", "s6"] if i % 2 == 0 else ["s6", "base"]})
-    return cases
+    return [{"label": f"p{p}-c{c}", "prompt": p, "concurrency": c, "gpu": gpus[i % len(gpus)], "methods": ["base", "s6"] if i % 2 == 0 else ["s6", "base"]}
+            for i, (p, c) in enumerate((p, c) for p in PROMPTS for c in CONCURRENCY)] if gpus else []
+
+
+def peak_units(gpus=range(1, 8)) -> list[dict]:
+    """One sweep per (prompt, method): prompts round-robin over `gpus` (no GPUs: no units), both methods of a prompt back-to-back on its GPU."""
+    gpus = list(gpus)
+    return [{"label": f"{m}-p{p}-peak", "prompt": p, "method": m, "gpu": gpus[i % len(gpus)]} for i, p in enumerate(PROMPTS) for m in ("base", "s6")] if gpus else []
+
+
+def sweep_concurrencies(c_max: int, near: float = 0.15) -> list[int]:
+    """Concurrencies above the probe: 16, 32, ... doubling below c_max, then c_max itself (a power of two within `near`
+    below c_max is dropped as a near-duplicate); never above c_max, empty when the probe already is the maximum."""
+    if c_max <= PEAK_PROBE:
+        return [c_max] if 0 < c_max < PEAK_PROBE else []
+    powers = []
+    c = 2 * PEAK_PROBE
+    while c < c_max:
+        if c < (1 - near) * c_max:
+            powers.append(c)
+        c *= 2
+    return powers + [c_max]
+
+
+def peak_plan(prompt: int, kv_tokens: int, gen: int = GEN_TOKENS) -> tuple[int, int]:
+    """(c_max, gen_tokens): the largest batch the pool holds with prompt + 2*gen tokens per sequence, where gen is raised
+    from GEN_TOKENS only when the admission ramp-up of that batch (ramp_steps) would not end inside the N-token run,
+    so compare.py's decode split stays a full-concurrency plateau; c_max also never exceeds what the token budget can
+    admit beside the running decodes. Both values are fixed for the whole sweep."""
+    while True:
+        batched = max(8192, prompt + 2 * gen)
+        c = min(kv_capacity(kv_tokens, 1, prompt + 2 * gen)["max_fitting_concurrency"], batched - prompt + 1)
+        need = ramp_steps(c, prompt, batched)
+        if need <= gen:
+            return c, gen
+        gen = need
+
+
+def retry_concurrency(rows: list[dict]) -> int:
+    """After a sweep: the concurrency to retry the top case at, or 0. The engine's profile run scales with max_num_seqs,
+    so the pool at c_max can be smaller than the probe's; the top case then reports kv_fits False together with the
+    capacity of its own pool, which a smaller max_num_seqs holds at least as well. Pointless when that capacity does not
+    exceed a concurrency that already fit."""
+    if not rows:
+        return 0
+    tp = (rows[-1].get("result") or {}).get("throughput") or {}
+    fit = tp.get("max_fitting_concurrency")
+    if tp.get("kv_fits") is not False or not fit:
+        return 0
+    fitted = [x["concurrency"] for x in rows if ((x.get("result") or {}).get("throughput") or {}).get("kv_fits")]
+    return fit if fit > max(fitted, default=0) else 0
+
+
+def peak_summary(rows: list[dict]) -> dict:
+    """Sweep table of one (prompt, method) plus its peak: the highest decode rate over the clean rows (a row whose decode
+    split was skipped, or that failed a check, is listed but not counted). Each row carries its own N (`gen_tokens`):
+    the probe generates GEN_TOKENS while the sweep may run the raised N of `peak_plan`."""
+    table = []
+    for x in rows:
+        tp = (x.get("result") or {}).get("throughput") or {}
+        d = tp.get("decode_timing") or {}
+        table.append({"concurrency": x["concurrency"], "gen_tokens": tp.get("tokens_per_seq"), "decode_tok_per_s": d.get("decode_tok_per_s"),
+                      "end_to_end_tok_per_s": tp.get("tok_per_s"), "prefill_seconds": d.get("prefill_seconds"), "kv_fits": tp.get("kv_fits"), "ok": x.get("ok", False)})
+    clean = [t for t in table if t["ok"] and t["decode_tok_per_s"] is not None]
+    best = max(clean, key=lambda t: t["decode_tok_per_s"]) if clean else {}
+    return {"sweep": table, "peak_decode_tok_per_s": best.get("decode_tok_per_s"), "peak_concurrency": best.get("concurrency")}
 
 
 def _method_args(method: str) -> list[str]:
@@ -86,10 +157,10 @@ def qual_compare_argv(method: str, ref: Path, out: Path, log: Path, compile_conf
     return argv + (["--compile-config", compile_config] if compile_config else [])
 
 
-def tp_compare_argv(method: str, prompt: int, concurrency: int, out: Path, log: Path, python: str = sys.executable) -> list[str]:
+def tp_compare_argv(method: str, prompt: int, concurrency: int, out: Path, log: Path, python: str = sys.executable, gen_tokens: int = GEN_TOKENS) -> list[str]:
     return [python, "-m", "ouro_depth.vllm_latent.compare", "--model", MODEL, *_method_args(method), "--out", str(out),
-            "--throughput", str(concurrency), "--tp-tokens", str(GEN_TOKENS), "--tp-prompt-tokens", str(prompt),
-            "--max-model-len", str(prompt + 256), "--max-num-seqs", str(concurrency), "--gpu-mem", "0.85", "--tp-warmup", "1",
+            "--throughput", str(concurrency), "--tp-tokens", str(gen_tokens), "--tp-prompt-tokens", str(prompt),
+            "--max-model-len", str(prompt + 2 * gen_tokens), "--max-num-seqs", str(concurrency), "--gpu-mem", "0.85", "--tp-warmup", "1",
             "--decode-timing", "--compile-config", FDO, "--engine-log", str(log)]
 
 
@@ -159,15 +230,14 @@ def capacity_problems(compare: dict) -> list[str]:
         return []
     if tp.get("kv_fits") is None:
         return [f"KV pool size not found in the engine log: concurrency {tp.get('seqs')} unverified, decode split skipped"]
-    return [f"KV pool {tp['kv_cache_tokens']} tokens < {tp['required_kv_tokens']} needed for concurrency {tp['seqs']} "
-            f"(at most {tp['max_fitting_concurrency']} fit): queued/preempted, not a {tp['seqs']}-way decode"]
+    return [over_capacity_message(tp)]
 
 
 def outcome(rows: list[dict]) -> dict:
-    """Exit-code policy (§4): only non-experimental qualification rows fail the job; throughput rows are listed apart."""
+    """Exit-code policy (§4): only non-experimental qualification rows fail the job; throughput/peak rows are listed apart."""
     bad = [x for x in rows if not x["ok"]]
-    return {"failed": [x["label"] for x in bad if not x["experimental"] and x.get("stage") != "throughput"],
-            "throughput_failed": [x["label"] for x in bad if not x["experimental"] and x.get("stage") == "throughput"],
+    return {"failed": [x["label"] for x in bad if not x["experimental"] and x.get("stage") not in PEAK_STAGES],
+            "throughput_failed": [x["label"] for x in bad if not x["experimental"] and x.get("stage") in PEAK_STAGES],
             "experimental_failed": [x["label"] for x in bad if x["experimental"]], "cases": len(rows)}
 
 
@@ -308,6 +378,41 @@ def throughput(r: Runner, case: dict) -> None:
               extra=dict(stage="throughput", prompt=case["prompt"], concurrency=case["concurrency"], method=method))
 
 
+def peak(r: Runner, unit: dict) -> None:
+    """One (prompt, method) sweep: the c=8 probe fixes the KV pool, then sweep_concurrencies(c_max) up to the pool's capacity."""
+    out, prompt, method, gpu = r.args.out / "peak", unit["prompt"], unit["method"], unit["gpu"]
+    if method == "base" and r.args.ouro_shim == "copy":
+        r.skip(unit["label"], "copy mode replaces the in-tree ouro.py; base cases cannot run", experimental=True); return
+    rows, plan = [], {}
+
+    def case(c: int, **extra) -> dict:
+        label = f"{method}-p{prompt}-c{c}-peak"
+        log = out / f"{label}.log"
+        argv = tp_compare_argv(method, prompt, c, out / label, log, sys.executable, plan.get("gen_tokens", GEN_TOKENS))
+        rows.append(r.run(label, argv, method, gpu, log, checks=compare_checks(method, "FULL_DECODE_ONLY", r.args.ouro_shim, out / label, log, False),
+                          extra=dict(stage="peak", prompt=prompt, concurrency=c, method=method, **plan, **extra)))
+        return rows[-1]
+
+    probe = case(PEAK_PROBE, gen_tokens=GEN_TOKENS)
+    kv = ((probe.get("result") or {}).get("throughput") or {}).get("kv_cache_tokens")
+    problems, retry = [], 0
+    if kv is None:
+        problems.append(f"c={PEAK_PROBE} probe did not report the KV pool size: sweep skipped")
+    else:
+        c_max, gen = peak_plan(prompt, kv)
+        plan.update(c_max=c_max, gen_tokens=gen)
+        for c in sweep_concurrencies(c_max):
+            case(c)
+        retry = retry_concurrency(rows)
+        if retry:
+            case(retry, retry=True)
+    summary = peak_summary(rows)
+    if summary["peak_concurrency"] is None and not problems:   # the summary row is the S6/base peak ratio's input: an unknown peak is a failure
+        problems.append("no clean decode row in the sweep: peak unknown")
+    r.emit({"label": unit["label"], "exit_code": 0, "experimental": False, "stage": "peak-summary", "prompt": prompt, "method": method,
+            "kv_cache_tokens": kv, **plan, "retry_concurrency": retry, **summary, "problems": problems})
+
+
 def prepare_shim(root: Path, shim: str) -> None:
     src = root / "ouro_depth" / "vllm_latent"
     if shim == "copy":
@@ -321,18 +426,28 @@ def prepare_shim(root: Path, shim: str) -> None:
     print(f"VLLM_SUITE_SHIM {shim} via {SHIM_DIR}/sitecustomize.py", flush=True)
 
 
+def throughput_gpus(args) -> list[int]:
+    return list(range(args.gpus)) if args.skip_qualification else list(range(1, args.gpus))
+
+
 def plan(args) -> dict:
-    out = args.out
-    return {"qualification": [gpu_tests_argv(), hf_reference_argv("s6", out / "qualification" / "hf-s6"), qual_compare_argv("s6", out / "r.json", out / "s6-eager", out / "l.log", FDO)],
-            "throughput": [{**c, "argv": [tp_compare_argv(m, c["prompt"], c["concurrency"], out / "throughput" / f"{m}-{c['label']}", out / "l.log") for m in c["methods"]]}
-                           for c in throughput_cases(range(1, args.gpus))]}
+    out, gpus = args.out, throughput_gpus(args)
+    d = {"qualification": [gpu_tests_argv(), hf_reference_argv("s6", out / "qualification" / "hf-s6"), qual_compare_argv("s6", out / "r.json", out / "s6-eager", out / "l.log", FDO)]}
+    if args.mode in ("matrix", "both"):
+        d["throughput"] = [{**c, "argv": [tp_compare_argv(m, c["prompt"], c["concurrency"], out / "throughput" / f"{m}-{c['label']}", out / "l.log") for m in c["methods"]]}
+                           for c in throughput_cases(gpus)]
+    if args.mode in ("peak", "both"):   # the sweep after the probe depends on the pool size read from the probe's engine log
+        d["peak"] = [{**u, "probe_argv": tp_compare_argv(u["method"], u["prompt"], PEAK_PROBE, out / "peak" / f"{u['method']}-p{u['prompt']}-c{PEAK_PROBE}-peak", out / "l.log")}
+                     for u in peak_units(gpus)]
+    return d
 
 
 def main(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument("--root", type=Path, default=Path("/work/loop_scale")); p.add_argument("--out", type=Path, default=Path("/trisol/output/vllm-fused"))
     p.add_argument("--ouro-shim", choices=["alias", "registry", "copy"], default="alias"); p.add_argument("--gpus", type=int, default=8)
-    p.add_argument("--timeout", type=int, default=1800); p.add_argument("--skip-throughput", action="store_true"); p.add_argument("--skip-qualification", action="store_true")
+    p.add_argument("--timeout", type=int, default=1800); p.add_argument("--skip-throughput", action="store_true", help="no matrix and no peak sweep"); p.add_argument("--skip-qualification", action="store_true")
+    p.add_argument("--mode", choices=["matrix", "peak", "both"], default="matrix", help="throughput stage: the fixed matrix, the per-prompt peak sweep, or both")
     p.add_argument("--dry-run", action="store_true", help="print the planned argv and exit")
     args = p.parse_args(argv)
     if args.gpus < 1:
@@ -343,15 +458,21 @@ def main(argv=None):
     subprocess.run(["nvidia-smi"], check=True)
     prepare_shim(args.root, args.ouro_shim)
     r = Runner(args)
-    tp_gpus = list(range(1, args.gpus)) if not args.skip_qualification else list(range(args.gpus))
+    tp_gpus = throughput_gpus(args)
+    work = {gpu: [] for gpu in tp_gpus}   # per GPU, in order: its matrix cases, then its peak units
+    if not args.skip_throughput and tp_gpus:
+        if args.mode in ("matrix", "both"):
+            for c in throughput_cases(tp_gpus):
+                work[c["gpu"]].append(lambda c=c: throughput(r, c))
+        if args.mode in ("peak", "both"):
+            for u in peak_units(tp_gpus):
+                work[u["gpu"]].append(lambda u=u: peak(r, u))
     jobs = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.gpus) as pool:
         if not args.skip_qualification:
             jobs.append(pool.submit(qualification, r))
-        if not args.skip_throughput and tp_gpus:
-            cases = throughput_cases(tp_gpus)
-            for gpu in tp_gpus:
-                jobs.append(pool.submit(lambda mine: [throughput(r, c) for c in mine], [c for c in cases if c["gpu"] == gpu]))
+        for fns in work.values():
+            jobs.append(pool.submit(lambda fns=fns: [f() for f in fns]))
         for j in jobs:
             j.result()
     (args.out / "all-results.json").write_text(json.dumps(r.rows, indent=1))

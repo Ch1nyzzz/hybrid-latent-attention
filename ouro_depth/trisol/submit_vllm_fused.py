@@ -3,18 +3,19 @@
 python ouro_depth/trisol/submit_vllm_fused.py --dry-run          # build the bundle, print the argv, submit nothing
 python ouro_depth/trisol/submit_vllm_fused.py                    # upload + submit (run by the main agent, not workflows)
 python ouro_depth/trisol/submit_vllm_fused.py --code-version 5   # reuse an uploaded code version
+python ouro_depth/trisol/submit_vllm_fused.py --suite-args "--mode peak --skip-qualification"   # extra suite flags
 
 The version name defaults to vllm-fused-<first 8 hex of the archive sha256>, so changed code never reuses a name, and
 the upload passes --force-restart: an interrupted upload is never resumed with different content (pick a new --version).
 
 The bootstrap (bash -lc) verifies the archive sha256, extracts it to /work/loop_scale, installs the transformers 4.56
 wheels into /work/hf-deps, stages the sitecustomize shim, greps the vLLM files that are not in the local source cache
-(recorded in the job log), then execs ouro_depth/trisol/run_vllm_fused_suite.py. Nothing is copied into the vLLM
-installation.
+(recorded in the job log), then execs ouro_depth/trisol/run_vllm_fused_suite.py with --ouro-shim plus any --suite-args
+(e.g. the peak sweep). Nothing is copied into the vLLM installation.
 """
 from __future__ import annotations
 
-import argparse, datetime, gzip, hashlib, io, json, subprocess, sys, tarfile, uuid
+import argparse, datetime, gzip, hashlib, io, json, shlex, subprocess, sys, tarfile, uuid
 from pathlib import Path
 
 ASSET = "loop-s6-math-code-0917"
@@ -72,8 +73,9 @@ def build_bundle(root: Path, dest: Path, version: str = "") -> dict:
     return manifest
 
 
-def bootstrap_script(archive_sha256: str, shim: str) -> str:
+def bootstrap_script(archive_sha256: str, shim: str, suite_args: str = "") -> str:
     greps = "\n".join(f"grep -n '{pat}' \"$V/{rel}\" | head -40 || echo \"MISSING $V/{rel}\"" for rel, pat in UNCACHED_GREPS)
+    extra = "".join(" " + shlex.quote(a) for a in shlex.split(suite_args))
     return f"""set -euo pipefail
 export PYTHONOPTIMIZE=0 PYTHONUNBUFFERED=1 OMP_NUM_THREADS=4 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false VLLM_USE_FLASHINFER_SAMPLER=0
 mkdir -p /work/loop_scale /work/hf-deps /work/s6shim
@@ -97,13 +99,13 @@ echo "UNCACHED_VLLM_FILES $V"
 python -c "import vllm._custom_ops as o; print('MERGE_ATTN_STATES_OP', hasattr(o, 'merge_attn_states'))" || true
 export PYTHONPATH=/work/hf-deps:/work/loop_scale
 cd /work/loop_scale
-exec python ouro_depth/trisol/run_vllm_fused_suite.py --ouro-shim {shim}
+exec python ouro_depth/trisol/run_vllm_fused_suite.py --ouro-shim {shim}{extra}
 """
 
 
 def submit_argv(name: str, code_version, bootstrap: str, key: str) -> list[str]:
     return ["trisol", "train", "submit", name, "--team", TEAM, "--visibility", "team", "--description",
-            "Fused S6 latent-cache vLLM path: GPU ops tests, eager/FULL_DECODE_ONLY/FULL qualification vs HF with base control, base-vs-S6 throughput matrix",
+            "Fused S6 latent-cache vLLM path: GPU ops tests, eager/FULL_DECODE_ONLY/FULL qualification vs HF with base control, base-vs-S6 throughput matrix or peak decode sweep (--suite-args)",
             "--framework", "custom", "--mode", "full", "--base-model", BASE_MODEL, "--dataset", DATASET, "--model", STUDENT_ASSET,
             "--model", f"{ASSET}:{code_version}", "--no-output-model", "--cluster", CLUSTER, "--gpu-model", "A100-SXM4-80GB", "--gpu-count", "8",
             "--image-ref", IMAGE, "--command", "bash", "--args=-lc", "--args=" + bootstrap, "--checkpoint-disable", "--backoff-limit", "0",
@@ -139,17 +141,18 @@ def main(argv=None) -> int:
     p.add_argument("--name", default="loop-s6-vllm-fused-0917"); p.add_argument("--code-version", default="", help="reuse this uploaded code version (skip upload)")
     p.add_argument("--ouro-shim", choices=["alias", "registry", "copy"], default="alias")
     p.add_argument("--version", default="", help="uploaded version name (default: vllm-fused-<archive sha256[:8]>)")
+    p.add_argument("--suite-args", default="", help='appended to the run_vllm_fused_suite.py command, e.g. "--mode peak --skip-qualification"')
     p.add_argument("--dry-run", action="store_true", help="build the bundle and print the argv; never upload or submit")
     args = p.parse_args(argv)
     dest = args.out_dir or Path("/tmp/vllm-fused-bundle")
     manifest = build_bundle(args.root, dest, args.version)
-    bootstrap = bootstrap_script(manifest["archive_sha256"], args.ouro_shim)
+    bootstrap = bootstrap_script(manifest["archive_sha256"], args.ouro_shim, args.suite_args)
     (dest / "bootstrap.sh").write_text(bootstrap)
     version = args.code_version or "<version_code after upload>"
     argv_submit = submit_argv(args.name, version, bootstrap, str(uuid.uuid4()))
     (dest / "submit-argv.json").write_text(json.dumps(argv_submit))
     if args.dry_run:
-        print(json.dumps({"dry_run": True, "bundle_dir": str(dest), "version": manifest["version"], "archive_sha256": manifest["archive_sha256"],
+        print(json.dumps({"dry_run": True, "bundle_dir": str(dest), "version": manifest["version"], "archive_sha256": manifest["archive_sha256"], "suite_args": args.suite_args,
                           "archive_bytes": manifest["archive_bytes"], "files": len(manifest["files"]), "upload_argv": upload_argv(dest, manifest["version"]),
                           "submit_argv": argv_submit}, indent=1))
         return 0
