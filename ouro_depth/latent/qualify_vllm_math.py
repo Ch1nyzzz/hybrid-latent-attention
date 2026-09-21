@@ -2,7 +2,7 @@
 
 Per position the HF model (S6 engine, or the original Ouro with --base) gives the full bf16-logit -> fp32 log_softmax
 distribution; the vLLM side contributes its top-K logprobs (vllm_logprobs.npz next to compare.json, else the top-5 dicts
-in compare.json). Gate: mean KL <= 0.002, max KL <= 0.01, top-1 >= 15/16 per prompt. The old top-5 absolute-error
+in compare.json). Gate defaults are defined in logprob_metrics.GATE; --max-kl explicitly overrides only maximum KL. The old top-5 absolute-error
 criteria are reported only (below bf16 logit resolution). This is a bounded short/4K numerical check.
 """
 import argparse
@@ -15,7 +15,7 @@ import torch
 
 from .batched_engine import BatchedRollingEngine
 from .hf_reference import BaseStepper
-from .logprob_metrics import position_metrics, summarize
+from .logprob_metrics import GATE, position_metrics, summarize
 from .register import LatentStudent
 from .training_common import amp
 from .vendor_model import load_teacher
@@ -41,7 +41,11 @@ def main():
     parser.add_argument('--base', action='store_true', help='replay with the original Ouro (exact per-loop cache)')
     parser.add_argument('--compare', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--max-kl', type=float, default=GATE['max_kl'],
+                        help='Explicit maximum-KL gate; other thresholds stay unchanged')
     args = parser.parse_args()
+    if not 0 < args.max_kl <= 1:
+        parser.error('--max-kl must be in (0, 1]')
     if bool(args.student) == args.base:
         parser.error('give exactly one of --student or --base')
     comparison = json.loads(Path(args.compare).read_text())
@@ -81,7 +85,7 @@ def main():
                 if index+1 < len(row['gen_ids']):
                     logits = step(torch.tensor([[token]], device=device))
         print(json.dumps({'FIXED_PREFIX_PROGRESS': {'id': row['id'], 'positions': len(row['gen_ids'])}}), flush=True)
-    summary = summarize(positions)
+    summary = summarize(positions, gate=dict(GATE, max_kl=args.max_kl))
     summary['base'] = args.base
     Path(args.output).write_text(json.dumps(dict(summary=summary, positions=positions), indent=2))
     print(json.dumps({'FIXED_PREFIX_QUALIFICATION': summary}), flush=True)

@@ -9,10 +9,11 @@ if [[ "${TRISOL_RESUME:-false}" == true ]]; then
   exit 2
 fi
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
-COMMON=("$@" --data-dir "$DATA" --steps 600 --global-batch-size 128 --micro-batch-size 4)
+GEOMETRY=(--rank "${S6_RANK_K:-512}" --rank-v "${S6_RANK_V:-512}" --rank1 "${S6_RANK1:-256}")
+COMMON=("$@" "${GEOMETRY[@]}" --data-dir "$DATA" --steps 600 --global-batch-size 128 --micro-batch-size 4)
 export S6_QUALIFY=1
 bash "$ROOT/ouro_depth/trisol/run_stage1_recipe.sh" "${COMMON[@]}" --stop-after 2
 bash "$ROOT/ouro_depth/trisol/run_stage1_recipe.sh" "${COMMON[@]}" --resume "$OUT/checkpoint-000002" --stop-after 8
-python "$ROOT/ouro_depth/trisol/verify_s6_stage1_qualification.py" "$OUT" --data-dir "$DATA"
+python "$ROOT/ouro_depth/trisol/verify_s6_stage1_qualification.py" "$OUT" --data-dir "$DATA" "${GEOMETRY[@]}"
 unset S6_QUALIFY
 exec bash "$ROOT/ouro_depth/trisol/run_stage1_recipe.sh" "${COMMON[@]}" --resume "$OUT/checkpoint-000008" --stop-after 600

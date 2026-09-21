@@ -143,7 +143,7 @@ def test_generation_resume_imports_scores_and_only_generates_missing_samples(tmp
     monkeypatch.setattr(generate,'BatchedLatentDecoder',Decoder)
     monkeypatch.setattr(generate,'grade',lambda *args:True)
     out=tmp_path/'output'
-    monkeypatch.setattr(sys,'argv',['generate','--model-path','unused','--data',str(data),'--output',str(out),'--student',str(ckpt),'--n','2','--max-new','4','--max-model-len','10','--prompt-chunk-size','0','--batch','4','--batched-latent','--resume-from',str(resume)])
+    monkeypatch.setattr(sys,'argv',['generate','--reference-hf','--model-path','unused','--data',str(data),'--output',str(out),'--student',str(ckpt),'--n','2','--max-new','4','--max-model-len','10','--prompt-chunk-size','0','--batch','4','--batched-latent','--resume-from',str(resume)])
     generate.main()
     rows=[json.loads(x) for x in (out/'shard0.jsonl').read_text().splitlines()]
     summary=json.loads((out/'summary0.json').read_text())
@@ -164,3 +164,12 @@ def test_resume_rejects_invalid_elapsed_before_generation(tmp_path,elapsed):
     (tmp_path/'resume-protocol.json').write_text(json.dumps(dict(elapsed_seconds=elapsed)))
     with pytest.raises(ValueError,match='elapsed_seconds'):
         load_completed(tmp_path,[],{})
+
+
+def test_auto_concurrency_reserves_null_block_and_whole_problems():
+    assert matheval.safe_request_batch(909872, 128, 10240, 4) == (22, 88)
+    assert matheval.safe_request_batch(909872, 32, 10240, 4) == (8, 32)
+    assert matheval.safe_request_batch(81920, 128, 10240, 4) == (1, 4)
+    for pool in (None, 40960):
+        with pytest.raises(ValueError):
+            matheval.safe_request_batch(pool, 128, 10240, 4)

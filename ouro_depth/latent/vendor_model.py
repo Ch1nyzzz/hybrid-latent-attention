@@ -12,3 +12,12 @@ def load_teacher(model_path: str, loops: int, device: torch.device, dtype=torch.
     model.config.total_ut_steps = loops
     model.model.total_ut_steps = loops
     return model
+
+
+def load_student_backbone(model_path: str, loops: int, device: torch.device):
+    """Independent FP32 master parameters; serving replay defines compute casts."""
+    model = load_teacher(model_path, loops, device, dtype=torch.float32)
+    model.requires_grad_(True)
+    # Fixed-depth S6 does not execute the adaptive exit gate.
+    model.model.early_exit_gate.requires_grad_(False)
+    return model

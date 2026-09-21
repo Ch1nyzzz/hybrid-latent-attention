@@ -17,7 +17,7 @@ class ReplayBatch:
     denominators: dict
 
 
-def prepare_batch(examples, teacher, stage, teacher_batch_size=1, *, padding_side='left'):
+def prepare_batch(examples, teacher, stage, teacher_batch_size=1, *, padding_side='left', include_first_denominator=False):
     """Teacher targets retain per-request coordinates and energy denominators.
 
     This bounds teacher working activations independently of student batch.
@@ -66,7 +66,7 @@ def prepare_batch(examples, teacher, stage, teacher_batch_size=1, *, padding_sid
             logits[index, offset:offset+n] = teacher_logits[j, :n].detach()
             for k, v in outputs.items():
                 targets[k][index, offset:offset+n] = v[j, :n].detach()
-                selected = v[j, :n] if stage == 2 else v[j, group[j][1]:n]
+                selected = v[j, :n] if stage == 2 else v[j, group[j][1] - int(include_first_denominator):n]
                 if not selected.numel():
                     raise ValueError('Stage3 requires at least two continuation tokens')
                 denoms[k][index] = selected.detach().float().square().mean().clamp_min(1e-8)

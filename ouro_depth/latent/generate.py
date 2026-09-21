@@ -150,14 +150,22 @@ def main():
     p.add_argument("--student", default="", help="latent student checkpoint; empty = base model")
     p.add_argument("--loops", type=int, default=4); p.add_argument("--max-new", type=int, default=3072); p.add_argument("--batch", type=int, default=16)
     p.add_argument("--n", type=int, default=1, help="samples per problem (avg@n / pass@n)"); p.add_argument("--temperature", type=float, default=0.0); p.add_argument("--top-p", type=float, default=1.0)
-    p.add_argument("--seed", type=int, default=0); p.add_argument("--prompt-chunk-size", type=int, default=256, help="0 = full prompt; record this policy with results")
+    p.add_argument("--seed", type=int, default=0); p.add_argument("--prompt-chunk-size", type=int, default=0, help="0 = full prompt; record this policy with results")
     p.add_argument("--batched-latent", action="store_true", help="batch decode using the shared S6 engine")
     p.add_argument("--cuda-graph-latent", action="store_true", help="capture batched latent decode in CUDA graphs (inference only)")
     p.add_argument("--compact-finished", action="store_true", help="remove finished rows from CUDA graph compute batches")
     p.add_argument("--resume-from", default="", help="import validated completed answers from this directory")
     p.add_argument("--max-model-len", type=int, default=0, help="0 retains the historical 4096+max_new limit")
     p.add_argument("--shard", type=int, default=0); p.add_argument("--nshards", type=int, default=1); p.add_argument("--limit", type=int, default=0)
+    p.add_argument('--reference-hf', action='store_true', help='Diagnostic reference only; production generation uses vLLM')
     args = p.parse_args()
+    if not args.reference_hf:
+        from ..vllm_latent.generation_entry import evaluation_command
+        try:
+            argv, env = evaluation_command(args)
+        except ValueError as e:
+            p.error(str(e))
+        os.execve(sys.executable, argv, env)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if args.cuda_graph_latent and (not args.student or device.type != "cuda"):
         p.error('--cuda-graph-latent requires a student checkpoint and CUDA')

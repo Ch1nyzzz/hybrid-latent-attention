@@ -36,6 +36,7 @@ from vllm.v1.attention.backend import AttentionType
 
 from ouro_depth.latent.register import LatentLayer
 from ouro_depth.vllm_latent import s6_layer, s6_ops
+from ouro_depth.vllm_latent.backbone_sync import apply_backbone_update, package_backbone
 from ouro_depth.vllm_latent.geometry import rope_theta, validate_geometry
 
 SPLIT_MAX_TOKENS_EAGER = 512  # bound for the kv-split heuristic when no CUDA-graph capture size exists
@@ -148,6 +149,7 @@ class OuroModel(nn.Module):
             raise ValueError("set hf_overrides={'latent_student': path}")
         ck = torch.load(student_path, map_location='cpu', weights_only=False)
         self.latent_cfg, self._student_state = ck['cfg'], ck['student']
+        self._pending_backbone = package_backbone(ck)
         validate_geometry(config, self.latent_cfg)
         # Per-layer strict loading (load_latent_student) rejects missing/extra keys inside each layer; only keys
         # outside the layer prefixes and nonfinite values remain to be checked (no CPU student is built).
@@ -204,6 +206,12 @@ class OuroModel(nn.Module):
             layer.self_attn.latent.load_state_dict(
                 {k[len(prefix):]: v for k, v in self._student_state.items() if k.startswith(prefix)}, strict=True)
         del self._student_state
+
+    def take_pending_backbone(self):
+        """A full-parameter package hands its backbone to ``load_weights`` exactly once (LLA: never set)."""
+        state = getattr(self, '_pending_backbone', None)
+        self._pending_backbone = None
+        return state
 
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -287,6 +295,11 @@ class OuroForCausalLM(nn.Module, SupportsLoRA):
         loader = AutoWeightsLoader(self, skip_prefixes=(['lm_head.'] if self.config.tie_word_embeddings else None))
         loaded = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
         self.model.finish_loading()
+        backbone = self.model.take_pending_backbone()
+        if backbone is not None:
+            # Full-parameter package: the trained FP32 master overwrites the HF-loaded body
+            # (in-place RNE cast into BF16), so rollout and eval serve the updated backbone.
+            apply_backbone_update(self, backbone)
         # Student parameters come from the checkpoint above (LLA readers are buffers) and the gate is unused: report both for vLLM's completeness check.
         loaded.update(name for name, _ in self.named_parameters() if '.latent.' in name or 'early_exit_gate' in name)
         return loaded

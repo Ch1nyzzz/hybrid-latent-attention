@@ -8,9 +8,50 @@ import torch
 import torch.distributed as dist
 
 SEMANTICS = "s6-block-window-replay-v1"
+FULL_PARAMETER_SEMANTICS = "s6-fullparam-opd-v1"
 
-def amp(device):
-    return torch.autocast("cuda", dtype=torch.bfloat16) if device.type == "cuda" else nullcontext()
+
+def trainable_parameters(*modules):
+    result, seen = [], set()
+    for module in modules:
+        for p in module.parameters():
+            if p.requires_grad and id(p) not in seen:
+                result.append(p)
+                seen.add(id(p))
+    return result
+
+
+def make_full_parameter_optimizer(backbone, student, *, backbone_lr=1e-6,
+                                  latent_lr=3e-5, backbone_wd=0., latent_wd=.01):
+    body, latent = trainable_parameters(backbone), trainable_parameters(student)
+    if not body or not latent or {id(p) for p in body} & {id(p) for p in latent}:
+        raise ValueError('Expected two nonempty disjoint parameter groups')
+    if any(p.dtype != torch.float32 for p in body + latent):
+        raise ValueError('Full-parameter AdamW requires FP32 master parameters')
+    return torch.optim.AdamW([
+        dict(params=body, lr=backbone_lr, weight_decay=backbone_wd, role='backbone'),
+        dict(params=latent, lr=latent_lr, weight_decay=latent_wd, role='latent')],
+        betas=(.9, .999))
+
+
+def optimizer_step_with_deltas(optimizer):
+    # CPU snapshots avoid a full FP32 model copy in GPU VRAM. The host-copy
+    # time/memory is included in update timing and must be benchmarked.
+    before = [[p.detach().to('cpu', copy=True) for p in g['params']]
+              for g in optimizer.param_groups]
+    optimizer.step()
+    result = {}
+    for index, (group, old) in enumerate(zip(optimizer.param_groups, before)):
+        squares = sum(float((p.detach().cpu().double() - x.double()).square().sum())
+                      for p, x in zip(group['params'], old))
+        result[group.get('role', str(index))] = math.sqrt(squares)
+    return result
+
+
+def amp(device, dtype=torch.bfloat16):
+    if device.type != "cuda" or dtype in (None, torch.float32):
+        return nullcontext()
+    return torch.autocast("cuda", dtype=dtype)
 
 def distributed():
     return dist.is_available() and dist.is_initialized()
@@ -26,13 +67,13 @@ def learning_rate_factor(step, total_steps, warmup):
     fraction = min(1.0, (step - warmup) / max(1, total_steps - warmup))
     return 0.1 + 0.45 * (1 + math.cos(math.pi * fraction))
 
-def synchronize_gradients(student):
+def synchronize_gradients(*modules, return_metrics=False):
     """SUM gradients already normalized by global token counts.
 
     Globally inactive parameters stay grad=None: AdamW must not decay an
     unused writer during all-exact attention or the detach control.
     """
-    params = list(student.parameters())
+    params = trainable_parameters(*modules)
     if distributed():
         active = torch.tensor([p.grad is not None for p in params], device=params[0].device,
                               dtype=torch.int32)
@@ -44,7 +85,13 @@ def synchronize_gradients(student):
             if parameter.grad is None:
                 parameter.grad = torch.zeros_like(parameter)
             dist.all_reduce(parameter.grad, op=dist.ReduceOp.SUM)
+    group_norms = [math.sqrt(sum(float(p.grad.detach().double().square().sum())
+                                for p in trainable_parameters(m) if p.grad is not None))
+                   for m in modules] if return_metrics else None
     norm = torch.nn.utils.clip_grad_norm_(params, 1.0, error_if_nonfinite=True)
+    if return_metrics:
+        return dict(grad_norm=norm.item(), group_grad_norms=group_norms,
+                    clip_coefficient=min(1., 1. / (norm.item() + 1e-6)))
     return norm.item()
 
 def rng_state():
@@ -59,14 +106,19 @@ def restore_rng(state):
     if torch.cuda.is_available():
         torch.cuda.set_rng_state_all(state["cuda"])
 
-def restore_checkpoint(path, student, optimizer, metadata, rank):
+def restore_checkpoint(path, student, optimizer, metadata, rank, *, backbone=None):
     path = Path(path)
     checkpoint = torch.load(path / "training.pt" if path.is_dir() else path,
                             map_location="cpu", weights_only=False)
-    if checkpoint["semantics"] != SEMANTICS or checkpoint["cfg"] != student.cfg:
+    semantics = FULL_PARAMETER_SEMANTICS if backbone is not None else SEMANTICS
+    if checkpoint["semantics"] != semantics or checkpoint["cfg"] != student.cfg:
         raise ValueError("Checkpoint execution/architecture mismatch")
     if checkpoint["metadata"] != metadata:
         raise ValueError("Checkpoint recipe/data/distribution mismatch")
+    if ('backbone' in checkpoint) != (backbone is not None):
+        raise ValueError('Backbone payload/restore mode mismatch')
+    if backbone is not None:
+        backbone.load_state_dict(checkpoint['backbone'], strict=True)
     student.load_state_dict(checkpoint["student"])
     optimizer.load_state_dict(checkpoint["optimizer"])
     restore_rng(checkpoint["rng_by_rank"][rank])
@@ -113,16 +165,17 @@ def setup_runtime(seed):
     return rank,world,device
 
 
-def broadcast_student(student):
+def broadcast_student(*modules):
     if distributed():
-        for p in student.parameters():dist.broadcast(p.data,src=0)
+        for p in trainable_parameters(*modules):dist.broadcast(p.data,src=0)
 
 
-def atomic_checkpoint(output, student, optimizer, completed, metadata):
+def atomic_checkpoint(output, student, optimizer, completed, metadata, *, progress=None, backbone=None):
     rank = dist.get_rank() if distributed() else 0
     states = [None] * (dist.get_world_size() if distributed() else 1)
     if distributed():dist.all_gather_object(states,rng_state())
     else:states[0]=rng_state()
+    semantics = FULL_PARAMETER_SEMANTICS if backbone is not None else SEMANTICS
     output=Path(output)
     destination=output / f'checkpoint-{completed:06d}'
     if rank==0:
@@ -130,23 +183,31 @@ def atomic_checkpoint(output, student, optimizer, completed, metadata):
         temporary=output / f'.writing-{completed:06d}'
         temporary.mkdir(parents=True,exist_ok=True)
         payload=dict(student=student.state_dict(),cfg=student.cfg,optimizer=optimizer.state_dict(),
-                     completed_steps=completed,rng_by_rank=states,metadata=metadata,semantics=SEMANTICS)
+                     completed_steps=completed,rng_by_rank=states,metadata=metadata,semantics=semantics)
+        if backbone is not None:payload['backbone']=backbone.state_dict()
+        if progress is not None:payload['progress']=progress
         torch.save(payload,temporary/'training.pt')
-        (temporary/'complete.json').write_text(json.dumps(dict(completed_steps=completed,semantics=SEMANTICS)))
+        (temporary/'complete.json').write_text(json.dumps(dict(completed_steps=completed,semantics=semantics)))
         temporary.rename(destination)
-        export=output / f'.student-{completed}.pt'
-        torch.save(dict(student=student.state_dict(),cfg=student.cfg,step=completed,
-                        metadata=metadata,semantics=SEMANTICS),export)
-        export.rename(output / f'student-{completed}.pt')
+        name = f'opd_student-{completed}.pt' if backbone is not None else f'student-{completed}.pt'
+        export=output / ('.' + name)
+        package=dict(student=student.state_dict(),cfg=student.cfg,step=completed,
+                     metadata=metadata,semantics=semantics)
+        if backbone is not None:package['backbone']=backbone.state_dict()
+        torch.save(package,export)
+        export.rename(output / name)
     if distributed():dist.barrier()
     return destination
 
 
-def load_export(path, device='cpu'):
+def load_export(path, device='cpu', *, allow_full_parameter=False):
     from .register import LatentStudent
     payload=torch.load(path,map_location='cpu',weights_only=False)
-    if payload.get('semantics')!=SEMANTICS:
-        raise ValueError('Only S6 exports can initialize the next stage')
+    allowed = {SEMANTICS, FULL_PARAMETER_SEMANTICS} if allow_full_parameter else {SEMANTICS}
+    if payload.get('semantics') not in allowed:
+        raise ValueError('Only compatible S6 exports can initialize the next stage')
+    if ('backbone' in payload) != (payload.get('semantics') == FULL_PARAMETER_SEMANTICS):
+        raise ValueError('Export semantics/backbone mismatch')
     return LatentStudent.from_checkpoint(payload,device),payload
 
 

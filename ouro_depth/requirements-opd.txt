@@ -1,0 +1,11 @@
+# Isolated CPU loss-test dependencies; do not overwrite the GPU vLLM image. Install pinned verl separately with --no-deps using
+# requirements-opd-verl.txt. Its full trainer requires Transformers 5; S6 uses 4.
+transformers==4.56.2
+torch==2.8.0
+numpy>=2.0,<2.3
+tensordict==0.9.1
+omegaconf>=2.3,<2.4
+hydra-core>=1.3,<1.4
+ray>=2.41
+pandas
+codetiming

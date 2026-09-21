@@ -11,11 +11,11 @@ from .register import ARCHITECTURE, apply_rope
 
 
 class BatchedRollingEngine:
-    def __init__(self, model, student, checkpointing=True):
+    def __init__(self, model, student, checkpointing=True, *, serving_numerics=False, fused_history=False):
         if student.cfg['architecture'] != ARCHITECTURE:
             raise ValueError('S6 student required')
-        if any(p.requires_grad for p in model.parameters()):
-            raise ValueError('Ouro body must be frozen')
+        if torch.is_grad_enabled() and any(p.requires_grad for p in model.parameters()):
+            raise ValueError('Trainable Ouro requires K-hop replay; serial snapshot is no-grad only')
         if model.training:
             raise ValueError('Frozen Ouro must be in eval mode')
         if getattr(model.model.rotary_emb, 'rope_type', 'default') != 'default':
@@ -28,6 +28,10 @@ class BatchedRollingEngine:
         if model.config.num_key_value_heads != student.cfg['heads']:
             raise ValueError('S6 Ouro requires equal query and KV head counts')
         self.checkpointing = checkpointing
+        self.serving_numerics = serving_numerics
+        self.fused_history = fused_history
+        if fused_history and not serving_numerics:
+            raise ValueError("Fused attention requires serving numerical conventions")
         self.prefix = self.tail = self.last_written = ()
         self.prefix_mask = self.tail_mask = self.positions = self.storage = None
 
@@ -36,6 +40,16 @@ class BatchedRollingEngine:
             raise ValueError('Seed only an empty engine')
         self.prefix, self.prefix_mask = tuple(rows), valid
         self.positions = valid.sum(-1)
+
+    @torch.no_grad()
+    def select_batch(self, indices):
+        """Compact detached rows only after a completed window backward."""
+        if self.tail or any(row.requires_grad for row in self.prefix):
+            raise RuntimeError("Compact only detached history at a window boundary")
+        self.prefix = tuple(row.index_select(0, indices) for row in self.prefix)
+        self.prefix_mask = self.prefix_mask.index_select(0, indices)
+        self.positions = self.positions.index_select(0, indices)
+        self.storage = None
 
     def clear_live(self):
         # Break engine -> checkpoint -> engine cycles after backward.
@@ -73,23 +87,36 @@ class BatchedRollingEngine:
         if self.positions is None:
             self.positions = ids.new_zeros(ids.shape[0])
         positions = (self.positions[:, None] + valid.long().cumsum(-1) - 1).clamp_min(0)
-        hidden = self.model.model.embed_tokens(ids)
+        from . import serving_replay
+        hidden = (serving_replay.embed_serving(self.model.model.embed_tokens, ids)
+                  if self.serving_numerics else self.model.model.embed_tokens(ids))
         cos, sin = self.model.model.rotary_emb(hidden, positions)
         masks = ((self.prefix_mask,) if self.prefix else ()) + ((self.tail_mask,) if self.tail else ())
         regs, firsts = [None] * len(self.layers), [None] * len(self.layers)
         aux = hidden.new_zeros((), dtype=torch.float32)
         default = (hidden.new_empty(0), hidden.new_ones(ids.shape[0]))
+        from . import serving_replay
         for loop in range(self.loops):
+            residual = None
             for index, (layer, sl) in enumerate(zip(self.layers, self.student.layers)):
                 blocks = ((self.prefix[index],) if self.prefix else ()) + ((self.tail[index],) if self.tail else ())
                 target, denom = (targets or {}).get((loop, index), default)
-                fn = partial(chunk_layer, layer=layer, sl=sl, loop=loop, masks=masks)
+                fn = partial(serving_replay.chunk_layer if self.serving_numerics else chunk_layer,
+                             layer=layer, sl=sl, loop=loop, masks=masks)
+                if self.serving_numerics:fn = partial(fn, fused_history=self.fused_history,
+                    checkpoint_attention=self.checkpointing == "attention")
                 args = (hidden, regs[index], firsts[index], valid, cos, sin, target, denom, *blocks)
-                result = checkpoint(fn, *args, use_reentrant=False) if self.checkpointing and torch.is_grad_enabled() else fn(*args)
-                hidden, regs[index], firsts[index], loss = result
+                if self.serving_numerics:args = (hidden, residual, *args[1:])
+                result = checkpoint(fn, *args, use_reentrant=False) if self.checkpointing and self.checkpointing != "attention" and torch.is_grad_enabled() else fn(*args)
+                if self.serving_numerics:
+                    hidden, residual, regs[index], firsts[index], loss = result
+                else:
+                    hidden, regs[index], firsts[index], loss = result
                 aux = aux + loss
-            hidden = self.model.model.norm(hidden)
-        rows = tuple(sl.pack(reg, first, cos, sin) for sl, reg, first in zip(self.student.layers, regs, firsts))
+            hidden = (serving_replay.norm(self.model.model.norm, hidden, residual)[0]
+                      if self.serving_numerics else self.model.model.norm(hidden))
+        rows = tuple(serving_replay.pack(sl, reg, first, cos, sin) if self.serving_numerics else sl.pack(reg, first, cos, sin)
+                     for sl, reg, first in zip(self.student.layers, regs, firsts))
         self.last_written = rows
         self.tail = tuple(torch.cat((a, b), 1) for a, b in zip(self.tail, rows)) if self.tail else rows
         self.tail_mask = torch.cat((self.tail_mask, valid), 1) if self.tail_mask is not None else valid

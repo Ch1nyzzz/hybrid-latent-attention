@@ -8,4 +8,4 @@ class RollingEngine(BatchedRollingEngine):
         self.prompt_chunk_size = prompt_chunk_size
 
     def prefill(self, ids, targets=None):
-        return super().prefill(ids, targets=targets, chunk_size=self.prompt_chunk_size)
+        return super().prefill(ids, targets=targets, chunk_size=self.prompt_chunk_size or ids.shape[1])

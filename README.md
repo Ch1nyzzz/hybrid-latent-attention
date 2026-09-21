@@ -4,15 +4,18 @@
 
 研究方向以 [RESEARCH_OBJECTIVE.md](RESEARCH_OBJECTIVE.md) 为准：目标定义、与 LLA 的边界、RoPE 障碍、第一版架构（recurrent memory register + decoupled RoPE）、第一阶段实验与预注册判据。
 
-## 当前训练计划（2026-09-17）
+## 当前实验：OPD 与 K/V 加宽（2026-09-21）
 
-当前执行 [S6 block writer 训练计划](ouro_depth/S6_BLOCK_WRITER_RECIPE_20260916.md)：独立 E₂/E₃/E₄ 累加终态、第一轮独立 latent、共享 reader；chunk 内精确 K/V，历史直接 latent attention。Stage1 attention KL，Stage2/3 logits KL，均带输出 MSE，全部 student 参数可训练。
+当前路线是完成 Stage1 后直接进行 OPD，另设 K1024/V512、K512/V1024 两个重新
+初始化的 Stage1 消融。独立 Stage3 不再作为本次实验入口。
 
-Stage2 默认严格滑动重放（256 token 历史视野、每次监督一个 chunk）；Stage3 固定 TBPTT32。三阶段600/600/400次更新、GB128、60%数学/40%网页，从本次联合 PCA 初始化重训。旧架构和训练入口已移除，历史文档保留。
+OPD 包含 RKL/FKL、K-hop replay、可选 backbone 全参数训练、vLLM 权重同步、
+完整 checkpoint 恢复和每 10 步一次 n=1 MATH500。宽度消融每 100 步评测一次，
+包含非对称权重的推理 padding、数值资格检查和 step8 续跑。
+配置、命令、环境隔离与证据边界见 [OPD 与 K/V 加宽说明](ouro_depth/OPD_KV_EXPERIMENTS.md)。
 
-Stage1 已完成600步；Stage2 首个 GB128 更新实测5015秒（8×A100，C=32），当前严格滑动重放实现的吞吐不具备长期训练可行性，尚待优化和重新验证。一次更新成功不代表Stage2资格或收敛通过，详见计划中的吞吐诊断记录。
-
-本地 CPU 数值、梯度、入口恢复和两进程 Gloo 验证已覆盖。HF CUDA Graph/动态压缩解码通过有界 GPU 数值与显存检查；vLLM参考路径未通过预设数值容差，不用于正式打分。S6完整数学评测成绩尚未确认。下面的 S5 指标仅是历史基线。
+原 [三阶段计划](ouro_depth/S6_BLOCK_WRITER_RECIPE_20260916.md)及相关入口保留为历史记录。
+下面的 S5 分数也是历史基线，不是当前 OPD 或加宽模型的成绩。
 
 ## 已完成评测（2026-09-15）
 
@@ -30,7 +33,9 @@ S5 stage3b 的 8 卡 Triton MATH500 已完成：avg@4 **51.15%**、pass@4 **69.2
 | `ouro_depth/vllm_kvshare/` | 同一方案的 vLLM 0.26 实现、对拍与吞吐测试；hybrid KV 管理可复用于新 cache 的 serving |
 | `ouro_depth/matheval/` | vLLM 数学评测（MATH500 / AIME24 / AIME25 / HMMT / BeyondAIME）与判分 |
 | `ouro_depth/latent/train_stage1_recipe.py` | 新语料 Stage1 蒸馏、多卡训练与恢复 |
-| `ouro_depth/latent/train_recipe.py` | S6 Stage2 滑动重放与 Stage3 TBPTT、全参数训练和恢复 |
+| `ouro_depth/latent/train_recipe.py` | 历史 S6 Stage2/3 训练与恢复 |
+| `ouro_depth/latent/train_decode.py` | Stage1 → OPD（RKL/FKL），K-hop replay 与可选全参数训练 |
+| `ouro_depth/trisol/run_stage1_math_intervals.py` | K/V 加宽 Stage1 与间隔 MATH500 |
 | `ouro_depth/latent/corpus_index.py` / `prepare_recipe_data.py` | 文档级数据划分、来源采样与恢复游标 |
 | `ouro_depth/latent/batched_engine.py` / `rolling_engine.py` | Latent prefill、真实 rolling decode 与训练计算图 |
 | `ouro_depth/vllm_latent/` | S6 latent cache 的 vLLM 0.26 融合 serving 路径（Triton 分页历史 + FA2 当前块 + LSE 合并，FULL_DECODE_ONLY CUDA graph）、HF 对拍/资格门与 base-vs-S6 吞吐套件；trisol 资格已通过，吞吐见 `INFERENCE_COMPARISON_20260917.md` |
