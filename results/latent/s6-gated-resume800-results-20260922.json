@@ -1,0 +1,36 @@
+{
+  "task": "S6 Gated Stage 1 Full Trajectory (100 -> 800) MATH-500 Evaluation",
+  "evaluated_at": "2026-09-22T06:00:22Z",
+  "geometry": {
+    "rank_k": 512,
+    "rank_v": 512,
+    "rank1": 256
+  },
+  "protocol": {
+    "benchmark": "MATH-500",
+    "engine": "fast vLLM TRITON_ATTN FULL_DECODE_ONLY",
+    "n": 1,
+    "temperature": 1.0,
+    "top_p": 0.7,
+    "max_new": 8192,
+    "shards": 8
+  },
+  "steps": [
+    {"step": 100, "accuracy": 0.468, "correct": 234, "total": 500, "mean_tokens": 3279.4, "trunc_rate": 0.308, "train_loss": null},
+    {"step": 200, "accuracy": 0.602, "correct": 301, "total": 500, "mean_tokens": 2594.6, "trunc_rate": 0.206, "train_loss": null},
+    {"step": 300, "accuracy": 0.612, "correct": 306, "total": 500, "mean_tokens": 2572.4, "trunc_rate": 0.202, "train_loss": null},
+    {"step": 400, "accuracy": 0.624, "correct": 312, "total": 500, "mean_tokens": 2564.4, "trunc_rate": 0.202, "train_loss": null},
+    {"step": 500, "accuracy": 0.648, "correct": 324, "total": 500, "mean_tokens": 2460.2, "trunc_rate": 0.192, "train_loss": null},
+    {"step": 600, "accuracy": 0.650, "correct": 325, "total": 500, "mean_tokens": 2482.7, "trunc_rate": 0.186, "train_loss": 0.051},
+    {"step": 700, "accuracy": 0.638, "correct": 319, "total": 500, "mean_tokens": 2563.3, "trunc_rate": 0.206, "train_loss": 0.04863},
+    {"step": 800, "accuracy": 0.642, "correct": 321, "total": 500, "mean_tokens": 2433.6, "trunc_rate": 0.186, "train_loss": 0.04797}
+  ],
+  "best_step": 600,
+  "best_accuracy": 0.650,
+  "latest_job": {
+    "id": "2102257644113764352",
+    "name": "loop-s6-stage1-gated-resume800-step700-0922",
+    "status": "succeeded",
+    "output_model": "loop-s6-stage1-gated-resume800-step700-0922:1"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "checked_at": "2026-09-19T22:15:00-04:00",
+  "ready_for_training": false,
+  "jobs": {
+    "rkl": {
+      "id": "2101346803520634880",
+      "step": 151,
+      "target": 200,
+      "update_seconds": 227.963,
+      "checkpoint": 150,
+      "math500_step": 150,
+      "math500_accuracy": 0.654
+    },
+    "fkl": {
+      "id": "2101397650283704320",
+      "step": 91,
+      "target": 200,
+      "update_seconds": 220.556,
+      "checkpoint": 90,
+      "math500_step": 90,
+      "math500_accuracy": 0.642
+    }
+  },
+  "quota": {
+    "used": 16,
+    "total": 16
+  },
+  "blockers": [
+    "Concurrent writes changed backbone_sync.py API during validation; freeze writer ownership before meaningful final tests.",
+    "rollout_worker.py and ouro_latent.py still reference removed sync APIs in observed intermediate state.",
+    "run_decode_math_intervals.training_args currently omits --train-backbone; production launcher is not full-parameter.",
+    "GPU fixed-input full-distribution synchronization, recovery, and full 8-GPU update memory/time not qualified."
+  ],
+  "tests": {
+    "initial": "22 passed, 1 failed (stand-in Engine missing packed_modules_mapping)",
+    "subsequent": "26 passed, 9 failed while implementation API was concurrently replaced; not stable release evidence"
+  },
+  "actions": "Existing training jobs unchanged. Paused shared-code edits after detecting concurrent writes. No code asset uploaded or new training job submitted."
+}

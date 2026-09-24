@@ -1,14 +1,15 @@
 """Shared n=1 MATH500 evaluation from the verified OPD interval runner."""
-import concurrent.futures, hashlib, json, os, shutil, signal, subprocess, sys, time
+import concurrent.futures, hashlib, json, os, queue, shutil, signal, subprocess, sys, time
 from pathlib import Path
 FDO='{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY"}'
 
-def inference_env(root, work, gpu, attempt=0):
+def inference_env(root, work, gpu, attempt=0, device=None):
     env={k:v for k,v in os.environ.items() if k not in {'RANK','LOCAL_RANK','WORLD_SIZE',
         'LOCAL_WORLD_SIZE','GROUP_RANK','ROLE_RANK','ROLE_WORLD_SIZE','MASTER_ADDR','MASTER_PORT'}
          and not k.startswith('TORCHELASTIC_')}
     visible=os.environ.get('CUDA_VISIBLE_DEVICES')
-    gpu_name=visible.split(',')[gpu] if visible else str(gpu)
+    device=gpu if device is None else device
+    gpu_name=visible.split(',')[device] if visible else str(device)
     shim=work/'shim';shim.mkdir(parents=True,exist_ok=True)
     shutil.copyfile(root/'ouro_depth/vllm_latent/s6_sitecustomize.py',shim/'sitecustomize.py')
     env.update(CUDA_VISIBLE_DEVICES=gpu_name,PYTHONPATH=f'{shim}:{root}',
@@ -18,14 +19,14 @@ def inference_env(root, work, gpu, attempt=0):
         VLLM_WORKER_MULTIPROC_METHOD='spawn',VLLM_LOGGING_LEVEL='INFO',PYTHONUNBUFFERED='1')
     return env
 
-def run_inference_shard(argv, root, work, gpu, attempts=3):
+def run_inference_shard(argv, root, work, gpu, attempts=3, device=None):
     """Retry only port races, preserving logs and reaping failed engine children."""
     for attempt in range(attempts):
         engine_log=work/f'engine-attempt-{attempt+1}.log'
         command=list(argv)
         command[command.index('--engine-log')+1]=str(engine_log)
         with (work/f'process-attempt-{attempt+1}.log').open('w') as log:
-            process=subprocess.Popen(command,env=inference_env(root,work,gpu,attempt),
+            process=subprocess.Popen(command,env=inference_env(root,work,gpu,attempt,device),
                 stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
             try:
                 code=process.wait(timeout=7200)
@@ -90,6 +91,8 @@ def evaluate(root, model, student, data, output, *, smoke=False):
         latent_window=int(os.environ.get('S6_EXACT_WINDOW','0') or 0),max_num_seqs=int(os.environ.get('S6_MATH_SEQS','64')),
         gpu=subprocess.run(['nvidia-smi','--query-gpu=name','--format=csv,noheader','-i','0'],
                            capture_output=True,text=True).stdout.strip())
+    gpus=int(os.environ.get('S6_MATH_GPUS','8'))
+    if gpus!=8:protocol['gpus']=gpus  # 8 keeps the original protocol record (resume-compatible)
     protocol_path=output/'protocol.json'
     if protocol_path.exists() and json.loads(protocol_path.read_text())!=protocol:
         raise ValueError('Refusing to mix evaluation protocols')
@@ -107,9 +110,14 @@ def evaluate(root, model, student, data, output, *, smoke=False):
             # the startup KV estimate budgets sliding-window layers at full length: fixed concurrency, no auto
             argv.remove('--auto-concurrency');argv+=['--window',str(protocol['latent_window'])]
         if smoke:argv+=['--limit','8']
-        run_inference_shard(argv,root,work,gpu)
+        # the 8-shard split is the protocol; with S6_MATH_GPUS<8 shards queue for a free GPU (one engine per GPU)
+        device=free.get()
+        try:run_inference_shard(argv,root,work,gpu,device=device)
+        finally:free.put(device)
+    free=queue.Queue()
+    for d in range(gpus):free.put(d)
     start=time.monotonic()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:list(pool.map(shard,range(8)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=gpus) as pool:list(pool.map(shard,range(8)))
     result=aggregate(output,rows,max_new=max_new)
     result.update(protocol=protocol,wall_seconds=time.monotonic()-start)
     (output/'summary.json').write_text(json.dumps(result,indent=2))

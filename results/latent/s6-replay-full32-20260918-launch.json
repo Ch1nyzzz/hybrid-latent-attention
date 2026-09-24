@@ -1,0 +1,16 @@
+{
+  "id": "2101029755364061184",
+  "status": "preparing",
+  "run_attempt": 0,
+  "patch_sha256": "48f23afa790dc8701f9ffd2ded891e05f48623f105b35b376bbd55f4e1c32433",
+  "files": [
+    "ouro_depth/latent/batched_engine.py",
+    "ouro_depth/latent/batched_decode.py",
+    "ouro_depth/latent/decode_training.py",
+    "ouro_depth/latent/serving_replay.py",
+    "ouro_depth/latent/fused_history.py",
+    "ouro_depth/latent/history_kernels.py",
+    "ouro_depth/latent/benchmark_replay_memory.py",
+    "ouro_depth/latent/verl_opd.py"
+  ]
+}

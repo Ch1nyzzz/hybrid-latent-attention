@@ -1,0 +1,33 @@
+{
+  "rkl": {
+    "id": "2101723740210466816",
+    "name": "loop-s6-newmath-rkl-200-0920",
+    "status": "running",
+    "reason": "Unschedulable",
+    "advisories": null,
+    "ready_verified": false
+  },
+  "fkl": {
+    "id": "2101723777799819264",
+    "name": "loop-s6-newmath-fkl-200-0920",
+    "status": "running",
+    "reason": "Unschedulable",
+    "advisories": null,
+    "ready_verified": false
+  },
+  "dataset": "loop-s6-newmath25600-private-20260920:1",
+  "code": "loop-s6-khop3-code-0919:21",
+  "initialization": "fresh Stage1-600; optimizer reset",
+  "steps": 200,
+  "train_questions": 25600,
+  "global_batch": 128,
+  "per_gpu_prompts": 16,
+  "replay_microbatch": 1,
+  "khop_hops": 3,
+  "latent_lr": 1e-05,
+  "backbone_lr": 1e-06,
+  "verification": "8 transition/data tests + 1 existing Stage1 rejection test + 1 real CPU checkpoint transition/resume test passed",
+  "formal_updates_confirmed": 0,
+  "observed_at_utc": "2026-09-20T17:26:29.127808+00:00",
+  "actual_state": "queued: both pods Unschedulable; platform running is not trainer execution"
+}

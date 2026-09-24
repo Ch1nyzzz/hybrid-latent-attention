@@ -1,0 +1,952 @@
+{
+  "recorded_at": "2026-09-18T05:17:45.792118+00:00",
+  "cli": "v0.13.0 (temporary isolated binary)",
+  "code_asset": "loop-s6-direct-code-0918:1",
+  "provenance": {
+    "git_head": "9944a69e10bbebe7c6ff25f50225763c3a70ffdc",
+    "working_tree_snapshot": true,
+    "source_files": [
+      "ouro_depth/AGENTS.md",
+      "ouro_depth/FRESH_S5_RECIPE_20260915.md",
+      "ouro_depth/INFERENCE_COMPARISON_20260917.md",
+      "ouro_depth/LATENT_CACHE_DIAGNOSTICS_20260915.md",
+      "ouro_depth/LATENT_PROGRESS_20260915.md",
+      "ouro_depth/LLA_REPRODUCTION_20260916.md",
+      "ouro_depth/OPTIMIZATION_20260915.md",
+      "ouro_depth/S5_EXPANDED_RESTART_RECIPE_20260916.md",
+      "ouro_depth/S5_TRAINING_RECIPE_20260916.md",
+      "ouro_depth/S6_BLOCK_WRITER_RECIPE_20260916.md",
+      "ouro_depth/S6_DIRECT_DECODE_20260918.md",
+      "ouro_depth/STAGE12_OPTIMIZATION_20260916.md",
+      "ouro_depth/STAGE2_ACCELERATION_20260917.md",
+      "ouro_depth/STAGE2_C256_PARALLEL_20260917.md",
+      "ouro_depth/STAGE3_WINDOW_REPLAY_20260916.md",
+      "ouro_depth/latent/__init__.py",
+      "ouro_depth/latent/analyze_math_gap.py",
+      "ouro_depth/latent/batched_engine.py",
+      "ouro_depth/latent/batched_recipe.py",
+      "ouro_depth/latent/benchmark_inference.py",
+      "ouro_depth/latent/compare_stage2_profiles.py",
+      "ouro_depth/latent/corpus_index.py",
+      "ouro_depth/latent/decode_training.py",
+      "ouro_depth/latent/eval_resume.py",
+      "ouro_depth/latent/evaluate_recipe.py",
+      "ouro_depth/latent/generate.py",
+      "ouro_depth/latent/graph_generate.py",
+      "ouro_depth/latent/hf_reference.py",
+      "ouro_depth/latent/init_teacher.py",
+      "ouro_depth/latent/logprob_metrics.py",
+      "ouro_depth/latent/prepare_recipe_data.py",
+      "ouro_depth/latent/probe_batched_generation.py",
+      "ouro_depth/latent/probe_capacity.py",
+      "ouro_depth/latent/probe_linear.py",
+      "ouro_depth/latent/profile_stage2.py",
+      "ouro_depth/latent/qualification.py",
+      "ouro_depth/latent/qualify_compact_math.py",
+      "ouro_depth/latent/qualify_graph_long.py",
+      "ouro_depth/latent/qualify_graph_math.py",
+      "ouro_depth/latent/qualify_vllm_math.py",
+      "ouro_depth/latent/register.py",
+      "ouro_depth/latent/rolling_engine.py",
+      "ouro_depth/latent/stage2_windows.py",
+      "ouro_depth/latent/stage3_replay.py",
+      "ouro_depth/latent/summarize_cache_diagnostics.py",
+      "ouro_depth/latent/teacher.py",
+      "ouro_depth/latent/train_decode.py",
+      "ouro_depth/latent/train_recipe.py",
+      "ouro_depth/latent/train_stage1.py",
+      "ouro_depth/latent/train_stage1_recipe.py",
+      "ouro_depth/latent/training_common.py",
+      "ouro_depth/latent/vendor_model.py",
+      "ouro_depth/latent/verl_opd.py",
+      "ouro_depth/lla/README.md",
+      "ouro_depth/lla/__init__.py",
+      "ouro_depth/lla/attention.py",
+      "ouro_depth/lla/bench.py",
+      "ouro_depth/lla/codec.py",
+      "ouro_depth/lla/engine.py",
+      "ouro_depth/lla/fit.py",
+      "ouro_depth/lla/prepare_tokens.py",
+      "ouro_depth/lla/quality.py",
+      "ouro_depth/lla/run_helios.sh",
+      "ouro_depth/lla/saturate.py",
+      "ouro_depth/matheval/math_grader.py",
+      "ouro_depth/matheval/merge_shards.py",
+      "ouro_depth/matheval/run_eval.sh",
+      "ouro_depth/matheval/vllm_eval.py",
+      "ouro_depth/model.py",
+      "ouro_depth/requirements-opd-verl.txt",
+      "ouro_depth/requirements-opd.txt",
+      "ouro_depth/shared_decode_cache.py",
+      "ouro_depth/tests/conftest.py",
+      "ouro_depth/tests/fixtures/gen_vllm026_symbols.py",
+      "ouro_depth/tests/fixtures/triton_builder_v026.py",
+      "ouro_depth/tests/test_corpus_index.py",
+      "ouro_depth/tests/test_inference_comparison.py",
+      "ouro_depth/tests/test_lla.py",
+      "ouro_depth/tests/test_lla_serving.py",
+      "ouro_depth/tests/test_model.py",
+      "ouro_depth/tests/test_ouro_latent_static.py",
+      "ouro_depth/tests/test_recipe_data.py",
+      "ouro_depth/tests/test_recipe_distributed.py",
+      "ouro_depth/tests/test_s6_direct_decode.py",
+      "ouro_depth/tests/test_s6_engine.py",
+      "ouro_depth/tests/test_s6_matheval.py",
+      "ouro_depth/tests/test_s6_ops.py",
+      "ouro_depth/tests/test_s6_ops_gpu.py",
+      "ouro_depth/tests/test_s6_serving.py",
+      "ouro_depth/tests/test_s6_training.py",
+      "ouro_depth/tests/test_stage2_windows.py",
+      "ouro_depth/tests/test_vllm_fused_suite.py",
+      "ouro_depth/tests/test_vllm_triton_patch.py",
+      "ouro_depth/trisol/collect_vllm_suite.py",
+      "ouro_depth/trisol/restore_s6_corpus.py",
+      "ouro_depth/trisol/run_fresh_recipe.sh",
+      "ouro_depth/trisol/run_inference_comparison.py",
+      "ouro_depth/trisol/run_s6_c256_stage2_qualified.sh",
+      "ouro_depth/trisol/run_s6_direct_decode.sh",
+      "ouro_depth/trisol/run_s6_math_all.sh",
+      "ouro_depth/trisol/run_s6_math_qualification.sh",
+      "ouro_depth/trisol/run_s6_stage1_qualified.sh",
+      "ouro_depth/trisol/run_s6_stage2_qualified.sh",
+      "ouro_depth/trisol/run_stage1_recipe.sh",
+      "ouro_depth/trisol/run_stage2_acceleration_probes.py",
+      "ouro_depth/trisol/run_stage2_c256_parallel.py",
+      "ouro_depth/trisol/run_stage2_checkpoint_validation.py",
+      "ouro_depth/trisol/run_stage2_vllm_all.py",
+      "ouro_depth/trisol/run_stage2_vllm_math.py",
+      "ouro_depth/trisol/run_vllm_fused_suite.py",
+      "ouro_depth/trisol/submit_vllm_fused.py",
+      "ouro_depth/trisol/verify_s6_stage1_qualification.py",
+      "ouro_depth/trisol/verify_s6_stage2_qualification.py",
+      "ouro_depth/trisol/vllm_probe.py",
+      "ouro_depth/vendor/configuration_ouro.py",
+      "ouro_depth/vendor/modeling_ouro.py",
+      "ouro_depth/vllm_kvshare/README.md",
+      "ouro_depth/vllm_kvshare/kvshare_attention.py",
+      "ouro_depth/vllm_kvshare/kvshare_compare.py",
+      "ouro_depth/vllm_kvshare/kvshare_hf_compare.py",
+      "ouro_depth/vllm_kvshare/kvshare_throughput.py",
+      "ouro_depth/vllm_kvshare/kvshare_vllm_test.py",
+      "ouro_depth/vllm_kvshare/ouro.py",
+      "ouro_depth/vllm_kvshare/run_redslab_test.sh",
+      "ouro_depth/vllm_latent/TRITON_AUDIT_20260915.md",
+      "ouro_depth/vllm_latent/compare.py",
+      "ouro_depth/vllm_latent/geometry.py",
+      "ouro_depth/vllm_latent/job_logging.sh",
+      "ouro_depth/vllm_latent/lla_layer.py",
+      "ouro_depth/vllm_latent/matheval.py",
+      "ouro_depth/vllm_latent/ouro_latent.py",
+      "ouro_depth/vllm_latent/ouro_lla.py",
+      "ouro_depth/vllm_latent/patch_triton.py",
+      "ouro_depth/vllm_latent/run_vllm_latent.sh",
+      "ouro_depth/vllm_latent/s6_layer.py",
+      "ouro_depth/vllm_latent/s6_ops.py",
+      "ouro_depth/vllm_latent/s6_sitecustomize.py",
+      "ouro_depth/vllm_latent/serving_config.py"
+    ],
+    "verl_revision": "8050ff113b5b2346e2709ee82c209e03b7c82901",
+    "stage1": "loop-s6-block-stage1-0916:1/student-600.pt",
+    "corpus": "loop-s5-expanded-corpus-packed-20260916:1",
+    "config": {
+      "steps": 50,
+      "global_batch": 128,
+      "replay_microbatch": 1,
+      "rollout_batch": 2,
+      "lr": 1e-06,
+      "tbptt": 32,
+      "prompt_chunk_size": 0,
+      "max_response": 2048,
+      "max_prompt": 1024,
+      "save_every": 5,
+      "eval_every": 25,
+      "eval_records": 16
+    }
+  },
+  "jobs": {
+    "stage3": {
+      "submission": {
+        "gpu_product_id": "2099127850496946176",
+        "gpu_display_name": "NVIDIA A100-SXM4-80GB",
+        "gpu_product_deleted": false,
+        "id": "2100816416088264704",
+        "team_id": "2074426702489989120",
+        "team_name": "hal9k-metis",
+        "created_by": "2074771312227647488",
+        "created_by_name": "\u5f20\u601d\u8fdc",
+        "updated_by": "2074771312227647488",
+        "updated_by_name": "\u5f20\u601d\u8fdc",
+        "created_at": "2026-09-18T05:17:19.732Z",
+        "updated_at": "2026-09-18T05:17:19.962Z",
+        "name": "loop-s6-direct-stage3-0918",
+        "description": "S6 Stage1 step600 directly to stage3; full prompt prefill, C1 decode TBPTT32; GB128 LR1e-6 constant, 50 updates; frozen Ouro, train S6 writer/readers. OPD uses pinned upstream verl loss with synchronous generation/scoring/replay.",
+        "status": "preparing",
+        "visibility": "team",
+        "shared_team_ids": [],
+        "framework": "custom",
+        "mode": "full",
+        "run_attempt": 0,
+        "cluster_id": "2071581637107265536",
+        "base_model_id": "2099179771119284224",
+        "base_model_version_code": 1,
+        "base_model_mount_path": "/trisol/input/model",
+        "datasets": [
+          {
+            "provider": "wenyon",
+            "dataset_id": "",
+            "version_code": 0,
+            "wenyon_id": "loop-s5-expanded-corpus-packed-20260916",
+            "dataset_name": "loop-s5-expanded-corpus-packed-20260916",
+            "mount_path": "/trisol/input/datasets/ds-0"
+          }
+        ],
+        "models": [
+          {
+            "model_id": "2100377921834192896",
+            "version_code": 1,
+            "mount_path": "/trisol/input/models/model-0"
+          },
+          {
+            "model_id": "2100810225085849600",
+            "version_code": 1,
+            "mount_path": "/trisol/input/models/model-1"
+          }
+        ],
+        "output_model_id": "2100816147078193152",
+        "hyperparams_hash": "757c1c749e45b8521f49d5dbb9391aea3725994f6814eda02e5a7d2b696b0239",
+        "stage": "preparing",
+        "substage": "",
+        "reason": "WarmupNotReady",
+        "next": "get",
+        "runtime_observed_at": null,
+        "runtime_stale": false,
+        "gpu_model": "A100-SXM4-80GB",
+        "configured_image": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+        "custom_config": {
+          "image_ref": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+          "command": [
+            "bash"
+          ],
+          "args": [
+            "/trisol/input/models/model-1/bootstrap.sh",
+            "stage3"
+          ]
+        },
+        "resources": {
+          "gpu_count": 8,
+          "world_size": 8,
+          "cpu": "88",
+          "memory": "1509Gi",
+          "shm": "754Gi",
+          "ephemeral_storage": "50Gi"
+        },
+        "checkpoint_discovery": {
+          "mode": "custom",
+          "prefix": "checkpoint-",
+          "completion": {
+            "type": "atomic"
+          },
+          "relative_path": "train"
+        },
+        "backoff_limit": 0,
+        "total_cost_minor": null,
+        "cost_missing_reason": null,
+        "cost_as_of": null,
+        "currency": ""
+      },
+      "argv": [
+        "/tmp/s6-direct-launch-0918/trisol",
+        "train",
+        "submit",
+        "loop-s6-direct-stage3-0918",
+        "--team",
+        "hal9k-metis",
+        "--visibility",
+        "team",
+        "--description",
+        "S6 Stage1 step600 directly to stage3; full prompt prefill, C1 decode TBPTT32; GB128 LR1e-6 constant, 50 updates; frozen Ouro, train S6 writer/readers. OPD uses pinned upstream verl loss with synchronous generation/scoring/replay.",
+        "--framework",
+        "custom",
+        "--mode",
+        "full",
+        "--base-model",
+        "ouro-1-4b:1",
+        "--dataset",
+        "loop-s5-expanded-corpus-packed-20260916:1",
+        "--model",
+        "loop-s6-block-stage1-0916:1",
+        "--model",
+        "loop-s6-direct-code-0918:1",
+        "--output-model",
+        "loop-s6-direct-stage3-0918",
+        "--create-output-model",
+        "--cluster",
+        "2071581637107265536",
+        "--gpu-product-id",
+        "2099127850496946176",
+        "--gpu-model",
+        "A100-SXM4-80GB",
+        "--gpu-count",
+        "8",
+        "--image-ref",
+        "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+        "--command",
+        "bash",
+        "--args",
+        "/trisol/input/models/model-1/bootstrap.sh",
+        "--args",
+        "stage3",
+        "--checkpoint-scan-path",
+        "train",
+        "--checkpoint-prefix",
+        "checkpoint-",
+        "--checkpoint-atomic",
+        "--backoff-limit",
+        "0",
+        "--idempotency-key",
+        "bd05f695-a2da-4876-bbad-979dc306f95e",
+        "-o",
+        "json"
+      ],
+      "latest_status": {
+        "gpu_product_id": "2099127850496946176",
+        "gpu_display_name": "NVIDIA A100-SXM4-80GB",
+        "gpu_product_deleted": false,
+        "id": "2100816416088264704",
+        "team_id": "2074426702489989120",
+        "team_name": "hal9k-metis",
+        "created_by": "2074771312227647488",
+        "created_by_name": "\u5f20\u601d\u8fdc",
+        "updated_by": "2074771312227647488",
+        "updated_by_name": "\u5f20\u601d\u8fdc",
+        "created_at": "2026-09-18T05:17:19.732Z",
+        "updated_at": "2026-09-18T05:18:07.612Z",
+        "name": "loop-s6-direct-stage3-0918",
+        "description": "S6 Stage1 step600 directly to stage3; full prompt prefill, C1 decode TBPTT32; GB128 LR1e-6 constant, 50 updates; frozen Ouro, train S6 writer/readers. OPD uses pinned upstream verl loss with synchronous generation/scoring/replay.",
+        "status": "queued",
+        "visibility": "team",
+        "shared_team_ids": [],
+        "framework": "custom",
+        "mode": "full",
+        "run_attempt": 0,
+        "cluster_id": "2071581637107265536",
+        "cluster_name": "w1",
+        "base_model_id": "2099179771119284224",
+        "base_model_name": "ouro-1-4b",
+        "base_model_version_code": 1,
+        "base_model_mount_path": "/trisol/input/model",
+        "datasets": [
+          {
+            "provider": "wenyon",
+            "dataset_id": "",
+            "version_code": 0,
+            "wenyon_id": "loop-s5-expanded-corpus-packed-20260916",
+            "dataset_name": "loop-s5-expanded-corpus-packed-20260916",
+            "display_name": "loop-s5-expanded-corpus-packed-20260916",
+            "wenyon_url": "https://wenyon.dp.tech/app/console/datasets/loop-s5-expanded-corpus-packed-20260916",
+            "mount_path": "/trisol/input/datasets/ds-0"
+          }
+        ],
+        "models": [
+          {
+            "model_id": "2100377921834192896",
+            "model_name": "loop-s6-block-stage1-0916",
+            "version_code": 1,
+            "mount_path": "/trisol/input/models/model-0"
+          },
+          {
+            "model_id": "2100810225085849600",
+            "model_name": "loop-s6-direct-code-0918",
+            "version_code": 1,
+            "mount_path": "/trisol/input/models/model-1"
+          }
+        ],
+        "output_model_id": "2100816147078193152",
+        "output_model_name": "loop-s6-direct-stage3-0918",
+        "hyperparams_hash": "757c1c749e45b8521f49d5dbb9391aea3725994f6814eda02e5a7d2b696b0239",
+        "stage": "launching",
+        "substage": "queueing",
+        "reason": "WaitingForAdmission",
+        "next": "quota",
+        "runtime_observed_at": "2026-09-18T05:18:07.611Z",
+        "runtime_stale": false,
+        "gpu_model": "A100-SXM4-80GB",
+        "configured_image": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+        "custom_config": {
+          "image_ref": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+          "command": [
+            "bash"
+          ],
+          "args": [
+            "/trisol/input/models/model-1/bootstrap.sh",
+            "stage3"
+          ]
+        },
+        "resources": {
+          "gpu_count": 8,
+          "world_size": 8,
+          "cpu": "88",
+          "memory": "1509Gi",
+          "shm": "754Gi",
+          "ephemeral_storage": "50Gi"
+        },
+        "checkpoint_discovery": {
+          "mode": "custom",
+          "prefix": "checkpoint-",
+          "completion": {
+            "type": "atomic"
+          },
+          "relative_path": "train"
+        },
+        "backoff_limit": 0,
+        "output_lifecycle": {
+          "state": "in_use",
+          "state_reason": "job_active",
+          "cleanup_phase": "idle"
+        },
+        "total_cost_minor": null,
+        "cost_missing_reason": "cost_pending",
+        "cost_as_of": null,
+        "currency": "CNY",
+        "cost_detail": [
+          {
+            "order_item_id": "44542656",
+            "run_attempt": 0,
+            "activation_seq": 1,
+            "action_kind": "training_create",
+            "quote_status": "quoted",
+            "quote": {
+              "sku_name": "8 * NVIDIA A100-SXM4-80GB",
+              "unit_price_minor": 12000,
+              "currency": "CNY",
+              "price_unit_seconds": 3600,
+              "quoted_at": "2026-09-18T05:17:19.596Z"
+            },
+            "cost_status": "charging",
+            "cost_settlement_source": null,
+            "total_cost_minor": null,
+            "cost_missing_reason": "cost_pending",
+            "cost_as_of": null,
+            "currency": "CNY",
+            "billed_from": "2026-09-18T05:17:19.931Z",
+            "billed_until": null
+          }
+        ]
+      }
+    },
+    "opd": {
+      "submission": {
+        "gpu_product_id": "2099127850496946176",
+        "gpu_display_name": "NVIDIA A100-SXM4-80GB",
+        "gpu_product_deleted": false,
+        "id": "2100816458844999680",
+        "team_id": "2074426702489989120",
+        "team_name": "hal9k-metis",
+        "created_by": "2074771312227647488",
+        "created_by_name": "\u5f20\u601d\u8fdc",
+        "updated_by": "2074771312227647488",
+        "updated_by_name": "\u5f20\u601d\u8fdc",
+        "created_at": "2026-09-18T05:17:29.892Z",
+        "updated_at": "2026-09-18T05:17:30.145Z",
+        "name": "loop-s6-direct-opd-0918",
+        "description": "S6 Stage1 step600 directly to opd; full prompt prefill, C1 decode TBPTT32; GB128 LR1e-6 constant, 50 updates; frozen Ouro, train S6 writer/readers. OPD uses pinned upstream verl loss with synchronous generation/scoring/replay.",
+        "status": "preparing",
+        "visibility": "team",
+        "shared_team_ids": [],
+        "framework": "custom",
+        "mode": "full",
+        "run_attempt": 0,
+        "cluster_id": "2071581637107265536",
+        "base_model_id": "2099179771119284224",
+        "base_model_version_code": 1,
+        "base_model_mount_path": "/trisol/input/model",
+        "datasets": [
+          {
+            "provider": "wenyon",
+            "dataset_id": "",
+            "version_code": 0,
+            "wenyon_id": "loop-s5-expanded-corpus-packed-20260916",
+            "dataset_name": "loop-s5-expanded-corpus-packed-20260916",
+            "mount_path": "/trisol/input/datasets/ds-0"
+          }
+        ],
+        "models": [
+          {
+            "model_id": "2100377921834192896",
+            "version_code": 1,
+            "mount_path": "/trisol/input/models/model-0"
+          },
+          {
+            "model_id": "2100810225085849600",
+            "version_code": 1,
+            "mount_path": "/trisol/input/models/model-1"
+          }
+        ],
+        "output_model_id": "2100816451450445824",
+        "hyperparams_hash": "757c1c749e45b8521f49d5dbb9391aea3725994f6814eda02e5a7d2b696b0239",
+        "stage": "preparing",
+        "substage": "",
+        "reason": "WarmupNotReady",
+        "next": "get",
+        "runtime_observed_at": null,
+        "runtime_stale": false,
+        "gpu_model": "A100-SXM4-80GB",
+        "configured_image": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+        "custom_config": {
+          "image_ref": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+          "command": [
+            "bash"
+          ],
+          "args": [
+            "/trisol/input/models/model-1/bootstrap.sh",
+            "opd"
+          ]
+        },
+        "resources": {
+          "gpu_count": 8,
+          "world_size": 8,
+          "cpu": "88",
+          "memory": "1509Gi",
+          "shm": "754Gi",
+          "ephemeral_storage": "50Gi"
+        },
+        "checkpoint_discovery": {
+          "mode": "custom",
+          "prefix": "checkpoint-",
+          "completion": {
+            "type": "atomic"
+          },
+          "relative_path": "train"
+        },
+        "backoff_limit": 0,
+        "total_cost_minor": null,
+        "cost_missing_reason": null,
+        "cost_as_of": null,
+        "currency": ""
+      },
+      "argv": [
+        "/tmp/s6-direct-launch-0918/trisol",
+        "train",
+        "submit",
+        "loop-s6-direct-opd-0918",
+        "--team",
+        "hal9k-metis",
+        "--visibility",
+        "team",
+        "--description",
+        "S6 Stage1 step600 directly to opd; full prompt prefill, C1 decode TBPTT32; GB128 LR1e-6 constant, 50 updates; frozen Ouro, train S6 writer/readers. OPD uses pinned upstream verl loss with synchronous generation/scoring/replay.",
+        "--framework",
+        "custom",
+        "--mode",
+        "full",
+        "--base-model",
+        "ouro-1-4b:1",
+        "--dataset",
+        "loop-s5-expanded-corpus-packed-20260916:1",
+        "--model",
+        "loop-s6-block-stage1-0916:1",
+        "--model",
+        "loop-s6-direct-code-0918:1",
+        "--output-model",
+        "loop-s6-direct-opd-0918",
+        "--create-output-model",
+        "--cluster",
+        "2071581637107265536",
+        "--gpu-product-id",
+        "2099127850496946176",
+        "--gpu-model",
+        "A100-SXM4-80GB",
+        "--gpu-count",
+        "8",
+        "--image-ref",
+        "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+        "--command",
+        "bash",
+        "--args",
+        "/trisol/input/models/model-1/bootstrap.sh",
+        "--args",
+        "opd",
+        "--checkpoint-scan-path",
+        "train",
+        "--checkpoint-prefix",
+        "checkpoint-",
+        "--checkpoint-atomic",
+        "--backoff-limit",
+        "0",
+        "--idempotency-key",
+        "0fc09eac-ca84-4b2c-b10c-715ba24a8834",
+        "-o",
+        "json"
+      ],
+      "latest_status": {
+        "gpu_product_id": "2099127850496946176",
+        "gpu_display_name": "NVIDIA A100-SXM4-80GB",
+        "gpu_product_deleted": false,
+        "id": "2100816458844999680",
+        "team_id": "2074426702489989120",
+        "team_name": "hal9k-metis",
+        "created_by": "2074771312227647488",
+        "created_by_name": "\u5f20\u601d\u8fdc",
+        "updated_by": "2074771312227647488",
+        "updated_by_name": "\u5f20\u601d\u8fdc",
+        "created_at": "2026-09-18T05:17:29.892Z",
+        "updated_at": "2026-09-18T05:18:07.614Z",
+        "name": "loop-s6-direct-opd-0918",
+        "description": "S6 Stage1 step600 directly to opd; full prompt prefill, C1 decode TBPTT32; GB128 LR1e-6 constant, 50 updates; frozen Ouro, train S6 writer/readers. OPD uses pinned upstream verl loss with synchronous generation/scoring/replay.",
+        "status": "queued",
+        "visibility": "team",
+        "shared_team_ids": [],
+        "framework": "custom",
+        "mode": "full",
+        "run_attempt": 0,
+        "cluster_id": "2071581637107265536",
+        "cluster_name": "w1",
+        "base_model_id": "2099179771119284224",
+        "base_model_name": "ouro-1-4b",
+        "base_model_version_code": 1,
+        "base_model_mount_path": "/trisol/input/model",
+        "datasets": [
+          {
+            "provider": "wenyon",
+            "dataset_id": "",
+            "version_code": 0,
+            "wenyon_id": "loop-s5-expanded-corpus-packed-20260916",
+            "dataset_name": "loop-s5-expanded-corpus-packed-20260916",
+            "display_name": "loop-s5-expanded-corpus-packed-20260916",
+            "wenyon_url": "https://wenyon.dp.tech/app/console/datasets/loop-s5-expanded-corpus-packed-20260916",
+            "mount_path": "/trisol/input/datasets/ds-0"
+          }
+        ],
+        "models": [
+          {
+            "model_id": "2100377921834192896",
+            "model_name": "loop-s6-block-stage1-0916",
+            "version_code": 1,
+            "mount_path": "/trisol/input/models/model-0"
+          },
+          {
+            "model_id": "2100810225085849600",
+            "model_name": "loop-s6-direct-code-0918",
+            "version_code": 1,
+            "mount_path": "/trisol/input/models/model-1"
+          }
+        ],
+        "output_model_id": "2100816451450445824",
+        "output_model_name": "loop-s6-direct-opd-0918",
+        "hyperparams_hash": "757c1c749e45b8521f49d5dbb9391aea3725994f6814eda02e5a7d2b696b0239",
+        "stage": "launching",
+        "substage": "queueing",
+        "reason": "WaitingForAdmission",
+        "next": "quota",
+        "runtime_observed_at": "2026-09-18T05:18:07.613Z",
+        "runtime_stale": false,
+        "gpu_model": "A100-SXM4-80GB",
+        "configured_image": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+        "custom_config": {
+          "image_ref": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+          "command": [
+            "bash"
+          ],
+          "args": [
+            "/trisol/input/models/model-1/bootstrap.sh",
+            "opd"
+          ]
+        },
+        "resources": {
+          "gpu_count": 8,
+          "world_size": 8,
+          "cpu": "88",
+          "memory": "1509Gi",
+          "shm": "754Gi",
+          "ephemeral_storage": "50Gi"
+        },
+        "checkpoint_discovery": {
+          "mode": "custom",
+          "prefix": "checkpoint-",
+          "completion": {
+            "type": "atomic"
+          },
+          "relative_path": "train"
+        },
+        "backoff_limit": 0,
+        "output_lifecycle": {
+          "state": "in_use",
+          "state_reason": "job_active",
+          "cleanup_phase": "idle"
+        },
+        "total_cost_minor": null,
+        "cost_missing_reason": "cost_pending",
+        "cost_as_of": null,
+        "currency": "CNY",
+        "cost_detail": [
+          {
+            "order_item_id": "44542666",
+            "run_attempt": 0,
+            "activation_seq": 1,
+            "action_kind": "training_create",
+            "quote_status": "quoted",
+            "quote": {
+              "sku_name": "8 * NVIDIA A100-SXM4-80GB",
+              "unit_price_minor": 12000,
+              "currency": "CNY",
+              "price_unit_seconds": 3600,
+              "quoted_at": "2026-09-18T05:17:29.757Z"
+            },
+            "cost_status": "charging",
+            "cost_settlement_source": null,
+            "total_cost_minor": null,
+            "cost_missing_reason": "cost_pending",
+            "cost_as_of": null,
+            "currency": "CNY",
+            "billed_from": "2026-09-18T05:17:30.108Z",
+            "billed_until": null
+          }
+        ]
+      },
+      "retries": [
+        {
+          "reason": "Packaged Git repository ownership mismatch; scope safe.directory to exact verified runtime source path",
+          "argv": [
+            "/tmp/s6-direct-launch-0918/trisol",
+            "train",
+            "update",
+            "2100816458844999680",
+            "--team",
+            "hal9k-metis",
+            "--env-add",
+            "GIT_CONFIG_COUNT=1",
+            "--env-add",
+            "GIT_CONFIG_KEY_0=safe.directory",
+            "--env-add",
+            "GIT_CONFIG_VALUE_0=/work/pinned-verl",
+            "--idempotency-key",
+            "06e77a14-66c3-4b64-8401-2d345984c0ce",
+            "-o",
+            "json"
+          ],
+          "response": {
+            "gpu_product_id": "2099127850496946176",
+            "gpu_display_name": "NVIDIA A100-SXM4-80GB",
+            "gpu_product_deleted": false,
+            "id": "2100816458844999680",
+            "team_id": "2074426702489989120",
+            "team_name": "hal9k-metis",
+            "created_by": "2074771312227647488",
+            "created_by_name": "\u5f20\u601d\u8fdc",
+            "updated_by": "2074771312227647488",
+            "updated_by_name": "\u5f20\u601d\u8fdc",
+            "created_at": "2026-09-18T05:17:29.892Z",
+            "updated_at": "2026-09-18T05:28:01.414Z",
+            "name": "loop-s6-direct-opd-0918",
+            "description": "S6 Stage1 step600 directly to opd; full prompt prefill, C1 decode TBPTT32; GB128 LR1e-6 constant, 50 updates; frozen Ouro, train S6 writer/readers. OPD uses pinned upstream verl loss with synchronous generation/scoring/replay.",
+            "status": "preparing",
+            "visibility": "team",
+            "shared_team_ids": [],
+            "framework": "custom",
+            "mode": "full",
+            "run_attempt": 1,
+            "cluster_id": "2071581637107265536",
+            "base_model_id": "2099179771119284224",
+            "base_model_version_code": 1,
+            "base_model_mount_path": "/trisol/input/model",
+            "datasets": [
+              {
+                "provider": "wenyon",
+                "dataset_id": "",
+                "version_code": 0,
+                "wenyon_id": "loop-s5-expanded-corpus-packed-20260916",
+                "dataset_name": "loop-s5-expanded-corpus-packed-20260916",
+                "mount_path": "/trisol/input/datasets/ds-0"
+              }
+            ],
+            "models": [
+              {
+                "model_id": "2100377921834192896",
+                "version_code": 1,
+                "mount_path": "/trisol/input/models/model-0"
+              },
+              {
+                "model_id": "2100810225085849600",
+                "version_code": 1,
+                "mount_path": "/trisol/input/models/model-1"
+              }
+            ],
+            "output_model_id": "2100816451450445824",
+            "hyperparams_hash": "757c1c749e45b8521f49d5dbb9391aea3725994f6814eda02e5a7d2b696b0239",
+            "message": "BackoffLimitExceeded: Job has reached the specified backoff limit (pod: Error (exit 1): TrainingProcessFailed: exit code 1)",
+            "stage": "terminal",
+            "substage": "",
+            "reason": "BackoffLimitExceeded",
+            "next": "none",
+            "runtime_observed_at": "2026-09-18T05:19:24.203Z",
+            "runtime_stale": true,
+            "last_log_at": "2026-09-18T05:18:34.267Z",
+            "gpu_model": "A100-SXM4-80GB",
+            "configured_image": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+            "custom_config": {
+              "image_ref": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+              "command": [
+                "bash"
+              ],
+              "args": [
+                "/trisol/input/models/model-1/bootstrap.sh",
+                "opd"
+              ],
+              "env": [
+                {
+                  "name": "GIT_CONFIG_COUNT",
+                  "value": "1"
+                },
+                {
+                  "name": "GIT_CONFIG_KEY_0",
+                  "value": "safe.directory"
+                },
+                {
+                  "name": "GIT_CONFIG_VALUE_0",
+                  "value": "/work/pinned-verl"
+                }
+              ]
+            },
+            "resources": {
+              "gpu_count": 8,
+              "world_size": 8,
+              "cpu": "88",
+              "memory": "1509Gi",
+              "shm": "754Gi",
+              "ephemeral_storage": "50Gi"
+            },
+            "checkpoint_discovery": {
+              "mode": "custom",
+              "prefix": "checkpoint-",
+              "completion": {
+                "type": "atomic"
+              },
+              "relative_path": "train"
+            },
+            "backoff_limit": 0,
+            "total_cost_minor": null,
+            "cost_missing_reason": null,
+            "cost_as_of": null,
+            "currency": ""
+          },
+          "stderr": "Idempotency-Key: 06e77a14-66c3-4b64-8401-2d345984c0ce\n"
+        },
+        {
+          "reason": "Switch all generation to fused vLLM S6 adapter; GPU qualification before training",
+          "id": "2100816458844999680",
+          "run_attempt": 2,
+          "status": "preparing",
+          "patch_sha256": "7d10d954ce7b39c7ce4dc18c029be68f520cdb6680da3fdc6b7b008960caa840",
+          "files": [
+            "ouro_depth/latent/train_decode.py",
+            "ouro_depth/latent/vllm_rollout.py",
+            "ouro_depth/latent/qualify_vllm_rollout.py",
+            "ouro_depth/latent/generate.py",
+            "ouro_depth/vllm_latent/rollout_worker.py",
+            "ouro_depth/vllm_latent/generation_entry.py",
+            "ouro_depth/vllm_latent/matheval.py"
+          ],
+          "idempotency_key": "d569acec-99ff-4f02-a880-3b132b279a5a"
+        },
+        {
+          "reason": "Switch all generation to fused vLLM S6 adapter; GPU qualification before training",
+          "id": "2100816458844999680",
+          "run_attempt": 3,
+          "status": "preparing",
+          "patch_sha256": "2e2895cfb16a043b5db7d93618aabb920e48da05cce6d0959784d79dc8126449",
+          "files": [
+            "ouro_depth/latent/train_decode.py",
+            "ouro_depth/latent/vllm_rollout.py",
+            "ouro_depth/latent/qualify_vllm_rollout.py",
+            "ouro_depth/latent/generate.py",
+            "ouro_depth/vllm_latent/rollout_worker.py",
+            "ouro_depth/vllm_latent/generation_entry.py",
+            "ouro_depth/vllm_latent/matheval.py"
+          ],
+          "idempotency_key": "9eade807-df23-483e-b153-59a1be13dceb"
+        },
+        {
+          "reason": "Switch all generation to fused vLLM S6 adapter; GPU qualification before training",
+          "id": "2100816458844999680",
+          "run_attempt": 4,
+          "status": "preparing",
+          "patch_sha256": "e925a116b45466d941480c8a229a26dd773cca24eb5ba90eea5f6c10b1f9f8fc",
+          "files": [
+            "ouro_depth/latent/batched_engine.py",
+            "ouro_depth/latent/serving_replay.py",
+            "ouro_depth/latent/decode_training.py",
+            "ouro_depth/latent/train_decode.py",
+            "ouro_depth/latent/vllm_rollout.py",
+            "ouro_depth/latent/qualify_vllm_rollout.py",
+            "ouro_depth/latent/generate.py",
+            "ouro_depth/vllm_latent/rollout_worker.py",
+            "ouro_depth/vllm_latent/generation_entry.py",
+            "ouro_depth/vllm_latent/matheval.py"
+          ],
+          "idempotency_key": "e239c387-3a88-4389-9c76-91ac076f1eed"
+        },
+        {
+          "reason": "Switch all generation to fused vLLM S6 adapter; GPU qualification before training",
+          "id": "2100816458844999680",
+          "run_attempt": 5,
+          "status": "preparing",
+          "patch_sha256": "bc8fc695a886cd45eba16e4d696683aa0dd47d399cb1f7112620a99510dc6734",
+          "files": [
+            "ouro_depth/latent/batched_engine.py",
+            "ouro_depth/latent/serving_replay.py",
+            "ouro_depth/latent/decode_training.py",
+            "ouro_depth/latent/train_decode.py",
+            "ouro_depth/latent/vllm_rollout.py",
+            "ouro_depth/latent/qualify_vllm_rollout.py",
+            "ouro_depth/latent/generate.py",
+            "ouro_depth/vllm_latent/rollout_worker.py",
+            "ouro_depth/vllm_latent/generation_entry.py",
+            "ouro_depth/vllm_latent/matheval.py"
+          ],
+          "idempotency_key": "51f1dc83-366f-4f9d-98ae-54d8098299ae"
+        },
+        {
+          "reason": "Switch all generation to fused vLLM S6 adapter; GPU qualification before training",
+          "id": "2100816458844999680",
+          "run_attempt": 6,
+          "status": "preparing",
+          "patch_sha256": "352be886af5f29ac075556c3fcd6a25ea8f2b4a125bb61064a6b867d2872079f",
+          "files": [
+            "ouro_depth/latent/batched_engine.py",
+            "ouro_depth/latent/serving_replay.py",
+            "ouro_depth/latent/decode_training.py",
+            "ouro_depth/latent/train_decode.py",
+            "ouro_depth/latent/vllm_rollout.py",
+            "ouro_depth/latent/qualify_vllm_rollout.py",
+            "ouro_depth/latent/generate.py",
+            "ouro_depth/vllm_latent/rollout_worker.py",
+            "ouro_depth/vllm_latent/generation_entry.py",
+            "ouro_depth/vllm_latent/matheval.py"
+          ],
+          "idempotency_key": "e779469a-a6c9-4a32-a88b-aa83f673f171"
+        },
+        {
+          "reason": "Switch all generation to fused vLLM S6 adapter; GPU qualification before training",
+          "id": "2100816458844999680",
+          "run_attempt": 7,
+          "status": "preparing",
+          "patch_sha256": "ea90cf529d5b8534c312c9bce8ae8192c6fc9dbf43e710790a525e392be039cd",
+          "files": [
+            "ouro_depth/latent/batched_engine.py",
+            "ouro_depth/latent/serving_replay.py",
+            "ouro_depth/latent/decode_training.py",
+            "ouro_depth/latent/train_decode.py",
+            "ouro_depth/latent/vllm_rollout.py",
+            "ouro_depth/latent/qualify_vllm_rollout.py",
+            "ouro_depth/latent/generate.py",
+            "ouro_depth/vllm_latent/rollout_worker.py",
+            "ouro_depth/vllm_latent/generation_entry.py",
+            "ouro_depth/vllm_latent/matheval.py"
+          ],
+          "idempotency_key": "262f2c21-0ece-4613-b3b9-848bac3678d4"
+        }
+      ]
+    }
+  },
+  "checked_at": "2026-09-18T05:18:08.391048+00:00"
+}

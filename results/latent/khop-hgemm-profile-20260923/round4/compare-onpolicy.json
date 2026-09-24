@@ -1,0 +1,116 @@
+{
+ "config": {
+  "model": "/data/erv1n/ouro-depth-20260913/base_model",
+  "output": "/data/erv1n/s6-khop-hgemm-20260923/results4/compare-onpolicy.json",
+  "prompt": 69,
+  "response": 25,
+  "backends": "dense,gemm-tf32,gemm-bf16",
+  "chunk": 1024,
+  "max_elements": 134217728,
+  "student": null,
+  "math": "/data/erv1n/s6-khop-hgemm-20260923/math500.jsonl",
+  "teacher_init": true
+ },
+ "gpu": "NVIDIA A100-SXM4-80GB",
+ "dense_objective": 3.2832395800214726,
+ "backends": {
+  "dense_drift": {
+   "mean": 0.619403064250946,
+   "max": 2.841259002685547,
+   "outside_clip": 0.5
+  },
+  "dense": {
+   "objective": 3.2832395800214726,
+   "objective_rel": 0.0,
+   "logp_vs_dense_mean": 0.0,
+   "logp_vs_dense_max": 0.0,
+   "gradients": {
+    "all": {
+     "cosine": 1.0,
+     "rel_l2": 0.0
+    },
+    "latent": {
+     "cosine": 1.0,
+     "rel_l2": 0.0
+    },
+    "inter_s": {
+     "cosine": 1.0,
+     "rel_l2": 0.0
+    },
+    "backbone": {
+     "cosine": 1.0,
+     "rel_l2": 0.0
+    }
+   },
+   "gate_pass": true
+  },
+  "gemm-tf32_drift": {
+   "mean": 0.3840268552303314,
+   "max": 1.5330123901367188,
+   "outside_clip": 0.5833333730697632
+  },
+  "gemm-tf32": {
+   "objective": 3.3970985182386357,
+   "objective_rel": 0.03467883943346542,
+   "logp_vs_dense_mean": 0.48133915662765503,
+   "logp_vs_dense_max": 2.4069604873657227,
+   "gradients": {
+    "all": {
+     "cosine": 0.672104601317431,
+     "rel_l2": 0.7730540567109195
+    },
+    "latent": {
+     "cosine": 0.6921876682778859,
+     "rel_l2": 0.7434715482569478
+    },
+    "inter_s": {
+     "cosine": 0.711515970259074,
+     "rel_l2": 0.788146770627574
+    },
+    "backbone": {
+     "cosine": 0.6691366831555022,
+     "rel_l2": 0.77752381868861
+    }
+   },
+   "gate_pass": false
+  },
+  "gemm-bf16_drift": {
+   "mean": 0.4383431673049927,
+   "max": 2.1527185440063477,
+   "outside_clip": 0.4583333432674408
+  },
+  "gemm-bf16": {
+   "objective": 3.4125380285840947,
+   "objective_rel": 0.03938136264846577,
+   "logp_vs_dense_mean": 0.3680816888809204,
+   "logp_vs_dense_max": 1.796394944190979,
+   "gradients": {
+    "all": {
+     "cosine": 0.40004674436241944,
+     "rel_l2": 1.192216548121348
+    },
+    "latent": {
+     "cosine": 0.5362187012300799,
+     "rel_l2": 1.1025580249296882
+    },
+    "inter_s": {
+     "cosine": 0.6902142476336666,
+     "rel_l2": 0.8417709005373887
+    },
+    "backbone": {
+     "cosine": 0.3774319599862405,
+     "rel_l2": 1.2054731395042677
+    }
+   },
+   "gate_pass": false
+  }
+ },
+ "dense_drift": {
+  "mean": 0.619403064250946,
+  "max": 2.841259002685547,
+  "outside_clip": 0.5
+ },
+ "prompt": 69,
+ "response": 25,
+ "mean_behaviour_logp": -6.488273620605469
+}

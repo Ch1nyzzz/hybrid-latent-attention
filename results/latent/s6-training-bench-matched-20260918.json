@@ -1,0 +1,87 @@
+{
+  "job": "2100846145247907840",
+  "attempt": 3,
+  "reports": [
+    {
+      "backend": "serving",
+      "microbatch": 2,
+      "tokens": 256,
+      "objective": 0.033740651328116655,
+      "grad_norm": 1.1135008335113525,
+      "teacher_seconds": 0.566583295352757,
+      "replay_seconds": 140.70878573972732,
+      "total_seconds": 141.7420306680724,
+      "peak_gib": 10.844438076019287,
+      "gradient": null,
+      "prefill_seconds": 0.5401748446747661,
+      "forward_loss_seconds": 46.09134363103658,
+      "backward_recompute_seconds": 93.51853414438665
+    },
+    {
+      "backend": "fused-backward",
+      "microbatch": 2,
+      "tokens": 256,
+      "objective": 0.033740651328116655,
+      "grad_norm": 1.113919973373413,
+      "teacher_seconds": 0.3608167991042137,
+      "replay_seconds": 135.74944373779,
+      "total_seconds": 136.62583567667753,
+      "peak_gib": 10.844438076019287,
+      "gradient": {
+        "relative_l2": 0.011113541077489153,
+        "cosine": 0.9999383413326366
+      },
+      "prefill_seconds": 0.41383413318544626,
+      "forward_loss_seconds": 45.46744757518172,
+      "backward_recompute_seconds": 89.34387296065688
+    },
+    {
+      "backend": "serving",
+      "microbatch": 4,
+      "tokens": 256,
+      "objective": 0.03355690464377403,
+      "grad_norm": 1.1206934452056885,
+      "teacher_seconds": 0.44889905396848917,
+      "replay_seconds": 72.35554276313633,
+      "total_seconds": 72.88277540635318,
+      "peak_gib": 10.844438076019287,
+      "gradient": null,
+      "prefill_seconds": 0.39705417584627867,
+      "forward_loss_seconds": 25.156955312937498,
+      "backward_recompute_seconds": 46.48962386883795
+    },
+    {
+      "backend": "fused-backward",
+      "microbatch": 4,
+      "tokens": 256,
+      "objective": 0.03355690464377403,
+      "grad_norm": 1.1199711561203003,
+      "teacher_seconds": 0.5051113171502948,
+      "replay_seconds": 67.71728628315032,
+      "total_seconds": 68.26337154116482,
+      "peak_gib": 10.844438076019287,
+      "gradient": {
+        "relative_l2": 0.011723694586255013,
+        "cosine": 0.9999314461054495
+      },
+      "prefill_seconds": 0.4097132943570614,
+      "forward_loss_seconds": 23.3599866759032,
+      "backward_recompute_seconds": 43.72524177003652
+    },
+    {
+      "backend": "reference",
+      "microbatch": 4,
+      "tokens": 256,
+      "objective": 0.033488402143120766,
+      "grad_norm": 1.1047226190567017,
+      "teacher_seconds": 0.40944078378379345,
+      "replay_seconds": 59.20497065782547,
+      "total_seconds": 59.75453725550324,
+      "peak_gib": 10.844438076019287,
+      "gradient": null,
+      "prefill_seconds": 0.43008366506546736,
+      "forward_loss_seconds": 19.201779357157648,
+      "backward_recompute_seconds": 39.29620608035475
+    }
+  ]
+}

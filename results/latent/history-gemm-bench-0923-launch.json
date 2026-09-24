@@ -1,0 +1,96 @@
+{
+  "submitted_at_utc": "2026-09-22T22:11:04.428753+00:00",
+  "code_asset": "loop-s6-history-gemm-bench-code:1",
+  "job": {
+    "gpu_product_id": "2099127850496946176",
+    "gpu_display_name": "NVIDIA A100-SXM4-80GB",
+    "gpu_product_deleted": false,
+    "id": "2102521083943985152",
+    "team_id": "2074426702489989120",
+    "team_name": "hal9k-metis",
+    "created_by": "2074771312227647488",
+    "created_by_name": "\u5f20\u601d\u8fdc",
+    "updated_by": "2074771312227647488",
+    "updated_by_name": "\u5f20\u601d\u8fdc",
+    "created_at": "2026-09-22T22:11:04.082Z",
+    "updated_at": "2026-09-22T22:11:04.285Z",
+    "name": "loop-s6-history-gemm-bench-0923",
+    "description": "history_gemm qualification: pytest, operator benchmark, real-model gradient gate (rel L2<=0.05, cos>=0.999 vs dense FP32), 3-update 8-GPU timing per precision.",
+    "status": "preparing",
+    "visibility": "team",
+    "shared_team_ids": [],
+    "framework": "custom",
+    "mode": "full",
+    "run_attempt": 0,
+    "cluster_id": "2071581637107265536",
+    "base_model_id": "2099179771119284224",
+    "base_model_version_code": 1,
+    "base_model_mount_path": "/trisol/input/model",
+    "datasets": [
+      {
+        "provider": "wenyon",
+        "dataset_id": "",
+        "version_code": 0,
+        "wenyon_id": "loop-s6-sft-math-20260921",
+        "dataset_name": "loop-s6-sft-math-20260921",
+        "mount_path": "/trisol/input/datasets/ds-0"
+      },
+      {
+        "provider": "wenyon",
+        "dataset_id": "",
+        "version_code": 0,
+        "wenyon_id": "loop-scale-wheels-tf456",
+        "dataset_name": "loop-scale-wheels-tf456",
+        "mount_path": "/trisol/input/datasets/ds-1"
+      }
+    ],
+    "models": [
+      {
+        "model_id": "2102521013811032064",
+        "version_code": 1,
+        "mount_path": "/trisol/input/models/model-0"
+      },
+      {
+        "model_id": "2101931179182653440",
+        "version_code": 1,
+        "mount_path": "/trisol/input/models/model-1"
+      }
+    ],
+    "output_model_id": "2102521076864000000",
+    "hyperparams_hash": "b04e6f4ee36279916fedd4571cc6d369768a7aa72a95619d74724d52fc72ca73",
+    "stage": "preparing",
+    "substage": "",
+    "reason": "WarmupNotReady",
+    "next": "get",
+    "runtime_observed_at": null,
+    "runtime_stale": false,
+    "gpu_model": "A100-SXM4-80GB",
+    "configured_image": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+    "custom_config": {
+      "image_ref": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+      "command": [
+        "bash",
+        "/trisol/input/models/model-0/bootstrap.sh"
+      ]
+    },
+    "resources": {
+      "gpu_count": 8,
+      "world_size": 8,
+      "cpu": "88",
+      "memory": "1509Gi",
+      "shm": "754Gi",
+      "ephemeral_storage": "50Gi"
+    },
+    "checkpoint_discovery": {
+      "mode": "disabled"
+    },
+    "backoff_limit": 0,
+    "next_steps": [
+      "wait for capacity, try a different gpu_model, or request more quota"
+    ],
+    "total_cost_minor": null,
+    "cost_missing_reason": null,
+    "cost_as_of": null,
+    "currency": ""
+  }
+}

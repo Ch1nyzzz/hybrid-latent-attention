@@ -1,0 +1,44 @@
+{
+  "task": "Task A: Gated Stage 1 Continuation 600->800 + Interval MATH-500",
+  "job_id": "2102257644113764352",
+  "job_name": "loop-s6-stage1-gated-resume800-step700-0922",
+  "submitted_at": "2026-09-22T04:44:15Z",
+  "status": "succeeded",
+  "completed_at": "2026-09-22T06:00:22Z",
+  "gpus": 8,
+  "gpu_spec": "NVIDIA A100-SXM4-80GB",
+  "cluster": "w1 (2071581637107265536)",
+  "team": "hal9k-metis",
+  "base_model": "ouro-1-4b:1",
+  "resume_from": {
+    "job_id": "2102234537512677376",
+    "job_name": "loop-s6-stage1-gated-resume800-0922",
+    "checkpoint_id": "2102257193318363136",
+    "checkpoint_name": "checkpoint-000700",
+    "step": 700
+  },
+  "training_config": {
+    "steps": 800,
+    "intervals": [700, 800],
+    "global_batch_size": 128,
+    "micro_batch_size": 4,
+    "geometry": {
+      "rank_k": 512,
+      "rank_v": 512,
+      "rank1": 256
+    },
+    "lr": 1e-3,
+    "warmup": 50,
+    "dataset": "loop-s5-expanded-corpus-packed-20260916:1"
+  },
+  "eval_config": {
+    "benchmarks": ["math500"],
+    "engine": "fast vLLM TRITON_ATTN FULL_DECODE_ONLY",
+    "n": 1,
+    "temperature": 1.0,
+    "top_p": 0.7,
+    "max_new": 8192,
+    "shards": 8
+  },
+  "output_model": "loop-s6-stage1-gated-resume800-0922"
+}

@@ -1,0 +1,115 @@
+{
+ "config": {
+  "model": "/data/erv1n/ouro-depth-20260913/base_model",
+  "output": "/data/erv1n/s6-khop-hgemm-20260923/results3/compare.json",
+  "prompt": 512,
+  "response": 2048,
+  "backends": "dense,gemm-tf32,gemm-bf16,gemm-fp32",
+  "chunk": 1024,
+  "max_elements": 134217728
+ },
+ "gpu": "NVIDIA A100-SXM4-80GB",
+ "dense_objective": 9.105063543802714,
+ "backends": {
+  "dense": {
+   "objective": 9.105063543802714,
+   "objective_rel": 0.0,
+   "logp_vs_dense_mean": 0.0,
+   "logp_vs_dense_max": 0.0,
+   "gradients": {
+    "all": {
+     "cosine": 1.0,
+     "rel_l2": 0.0
+    },
+    "latent": {
+     "cosine": 1.0,
+     "rel_l2": 0.0
+    },
+    "inter_s": {
+     "cosine": 1.0,
+     "rel_l2": 0.0
+    },
+    "backbone": {
+     "cosine": 1.0,
+     "rel_l2": 0.0
+    }
+   },
+   "gate_pass": true
+  },
+  "gemm-tf32": {
+   "objective": 9.10632239390037,
+   "objective_rel": 0.0001382582440638842,
+   "logp_vs_dense_mean": 0.08271151781082153,
+   "logp_vs_dense_max": 0.5398921966552734,
+   "gradients": {
+    "all": {
+     "cosine": 0.9999934833146084,
+     "rel_l2": 0.003639324167546311
+    },
+    "latent": {
+     "cosine": 0.9999944489457244,
+     "rel_l2": 0.0033510190599013237
+    },
+    "inter_s": {
+     "cosine": 0.9999952264619139,
+     "rel_l2": 0.0031035674070863774
+    },
+    "backbone": {
+     "cosine": 0.9999933517396937,
+     "rel_l2": 0.0036770934157448697
+    }
+   },
+   "gate_pass": true
+  },
+  "gemm-bf16": {
+   "objective": 9.105961905008769,
+   "objective_rel": 9.866611053649918e-05,
+   "logp_vs_dense_mean": 0.08580649644136429,
+   "logp_vs_dense_max": 0.4852104187011719,
+   "gradients": {
+    "all": {
+     "cosine": 0.9999935027283505,
+     "rel_l2": 0.0036533401824062847
+    },
+    "latent": {
+     "cosine": 0.9999939816830232,
+     "rel_l2": 0.003483666130976556
+    },
+    "inter_s": {
+     "cosine": 0.9999945401775955,
+     "rel_l2": 0.0033124119891659947
+    },
+    "backbone": {
+     "cosine": 0.9999934431087597,
+     "rel_l2": 0.0036759946019794703
+    }
+   },
+   "gate_pass": true
+  },
+  "gemm-fp32": {
+   "objective": 9.10570155192039,
+   "objective_rel": 7.007179187783221e-05,
+   "logp_vs_dense_mean": 0.08233019709587097,
+   "logp_vs_dense_max": 0.5064868927001953,
+   "gradients": {
+    "all": {
+     "cosine": 0.999993100071536,
+     "rel_l2": 0.003857333395362644
+    },
+    "latent": {
+     "cosine": 0.9999940913202825,
+     "rel_l2": 0.0034986632252175906
+    },
+    "inter_s": {
+     "cosine": 0.9999952809241541,
+     "rel_l2": 0.0030722276714359492
+    },
+    "backbone": {
+     "cosine": 0.9999929759313847,
+     "rel_l2": 0.0039039445148284628
+    }
+   },
+   "gate_pass": true
+  }
+ }
+}

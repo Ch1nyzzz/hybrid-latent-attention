@@ -1,0 +1,88 @@
+{
+  "completed": [
+    {
+      "step": 2,
+      "avg_at_n": 65.5,
+      "pass_at_n": 79.2,
+      "trunc_rate": 18.35,
+      "mean_tokens": 2420.296
+    },
+    {
+      "step": 50,
+      "avg_at_n": 59.5,
+      "pass_at_n": 76.2,
+      "trunc_rate": 21.6,
+      "mean_tokens": 2644.8845
+    },
+    {
+      "step": 100,
+      "avg_at_n": 60.25,
+      "pass_at_n": 77.6,
+      "trunc_rate": 23.15,
+      "mean_tokens": 2736.213
+    },
+    {
+      "step": 200,
+      "avg_at_n": 60.35,
+      "pass_at_n": 76.4,
+      "trunc_rate": 18.95,
+      "mean_tokens": 2458.5825
+    },
+    {
+      "step": 250,
+      "avg_at_n": 59.2,
+      "pass_at_n": 75.4,
+      "trunc_rate": 19.95,
+      "mean_tokens": 2540.556
+    },
+    {
+      "step": 300,
+      "avg_at_n": 59.55,
+      "pass_at_n": 76.2,
+      "trunc_rate": 20.35,
+      "mean_tokens": 2526.427
+    },
+    {
+      "step": 400,
+      "avg_at_n": 61.95,
+      "pass_at_n": 78.0,
+      "trunc_rate": 18.45,
+      "mean_tokens": 2405.2825
+    },
+    {
+      "step": 500,
+      "avg_at_n": 62.15,
+      "pass_at_n": 78.8,
+      "trunc_rate": 18.8,
+      "mean_tokens": 2460.839
+    },
+    {
+      "step": 550,
+      "avg_at_n": 64.9,
+      "pass_at_n": 80.6,
+      "trunc_rate": 17.85,
+      "mean_tokens": 2413.147
+    },
+    {
+      "step": 600,
+      "avg_at_n": 64.5,
+      "pass_at_n": 79.8,
+      "trunc_rate": 17.65,
+      "mean_tokens": 2361.079
+    }
+  ],
+  "missing": [
+    4,
+    150,
+    350,
+    450
+  ],
+  "protocol": {
+    "n": 4,
+    "temperature": 1,
+    "top_p": 0.7,
+    "max_new": 8192,
+    "problems": 500
+  },
+  "notes": "Step600 used concurrency32; others automatic capacity (~88). Same 8 shards and seed. Batch sizes differ; sampling realizations need not be identical."
+}

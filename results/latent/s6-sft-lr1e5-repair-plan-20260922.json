@@ -1,0 +1,15 @@
+{
+  "status": "prepared_not_submitted",
+  "reason": "Await restart choice: fresh matched runs versus preserve base progress",
+  "source_failed_job": "2102137956184621056",
+  "base_existing_job": "2102137925654282240",
+  "latent_initialization": "loop-s6-stage1-gated-k512v512-0921:1/student-600.pt",
+  "learning_rates": {
+    "base": 1e-05,
+    "latent_backbone": 1e-05,
+    "latent_modules": 1e-05
+  },
+  "steps": 800,
+  "global_batch": 128,
+  "khop_hops": 3
+}

@@ -1,0 +1,30 @@
+{
+  "task": "S6 Stage 1 Gated Residual writer (b=64, raw-hidden) K512/V512 Rank1=512 1000-step training with MATH-500 intervals",
+  "job_id": "2102560499873886208",
+  "job_name": "loop-s6-stage1-gated-res-k512v512-r1-512-1000step-0923",
+  "submitted_at": "2026-09-23T00:47:41.808Z",
+  "status": "preparing",
+  "cluster": "w1 (2071581637107265536)",
+  "gpus": 8,
+  "steps": 1000,
+  "geometry": {
+    "rank_k": 512,
+    "rank_v": 512,
+    "rank1": 512,
+    "bottleneck": 64,
+    "logical_cache_kib_per_token": 96
+  },
+  "code_model": "loop-s6-rank-ablation-code-0920:13",
+  "env_vars": {
+    "S6_RANK_K": "512",
+    "S6_RANK_V": "512",
+    "S6_RANK1": "512",
+    "S6_TOTAL_STEPS": "1000",
+    "TAR_OPTIONS": "--no-same-owner",
+    "PYTHONOPTIMIZE": "0",
+    "S6_SERVING_MAX_KL": "1.0",
+    "S6_SERVING_P99_KL": "0.5",
+    "S6_SERVING_MEAN_KL": "0.05",
+    "S6_SERVING_ALLOW_FAIL": "1"
+  }
+}

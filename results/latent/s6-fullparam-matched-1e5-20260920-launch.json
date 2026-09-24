@@ -1,0 +1,15 @@
+{
+  "rkl": {
+    "id": "2101508964637224960",
+    "name": "loop-s6-fullparam-rkl-1e5-0920"
+  },
+  "fkl": {
+    "id": "2101509002641801216",
+    "name": "loop-s6-fullparam-fkl-1e5-0920"
+  },
+  "code_asset": "loop-s6-khop3-code-0919:19",
+  "backbone_lr": 1e-05,
+  "latent_lr": 1e-05,
+  "stage": "automatic qualification before formal training",
+  "formal_updates_confirmed": 0
+}

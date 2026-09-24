@@ -1,0 +1,110 @@
+{
+  "submitted_at": "2026-09-22T01:36:39.103337+00:00",
+  "job_id": "2102210430586851328",
+  "job_name": "loop-s6-gated-stage1-math-0922",
+  "code_asset": "loop-s6-gated-math-code-0922:1",
+  "student_asset": "loop-s6-stage1-gated-k512v512-0921:1",
+  "steps": [
+    100,
+    200,
+    300,
+    400,
+    500,
+    600
+  ],
+  "protocol": {
+    "n_problems": 500,
+    "n": 1,
+    "temperature": 1,
+    "top_p": 0.7,
+    "max_new": 8192,
+    "seed": 20260915,
+    "shards": 8,
+    "backend": "TRITON_ATTN",
+    "cudagraph": "FULL_DECODE_ONLY"
+  },
+  "qualification": "step600 short and 4096-token prompts, 64-token fixed-prefix check; all exports strict-loaded",
+  "output_model": "loop-s6-gated-stage1-math-results-0922",
+  "output_path": "/trisol/output/gated-stage1-math",
+  "response": {
+    "gpu_product_id": "2099127850496946176",
+    "gpu_display_name": "NVIDIA A100-SXM4-80GB",
+    "gpu_product_deleted": false,
+    "id": "2102210430586851328",
+    "team_id": "2074426702489989120",
+    "team_name": "hal9k-metis",
+    "created_by": "2074771312227647488",
+    "created_by_name": "\u5f20\u601d\u8fdc",
+    "updated_by": "2074771312227647488",
+    "updated_by_name": "\u5f20\u601d\u8fdc",
+    "created_at": "2026-09-22T01:36:38.691Z",
+    "updated_at": "2026-09-22T01:36:38.949Z",
+    "name": "loop-s6-gated-stage1-math-0922",
+    "description": "Gated Stage1 checkpoints 100/200/300/400/500/600: strict gated export loading, step600 fixed-prefix serving qualification, then vLLM MATH500 n=1 each; temp1 top_p0.7 max8192 seed20260915; 8 shards TRITON_ATTN FULL_DECODE_ONLY.",
+    "status": "preparing",
+    "visibility": "team",
+    "shared_team_ids": [],
+    "framework": "custom",
+    "mode": "full",
+    "run_attempt": 0,
+    "cluster_id": "2071581637107265536",
+    "base_model_id": "2099179771119284224",
+    "base_model_version_code": 1,
+    "base_model_mount_path": "/trisol/input/model",
+    "datasets": [
+      {
+        "provider": "wenyon",
+        "dataset_id": "",
+        "version_code": 0,
+        "wenyon_id": "loop-scale-wheels-tf456",
+        "dataset_name": "loop-scale-wheels-tf456",
+        "mount_path": "/trisol/input/datasets/ds-0"
+      }
+    ],
+    "models": [
+      {
+        "model_id": "2102210192971137024",
+        "version_code": 1,
+        "mount_path": "/trisol/input/models/model-0"
+      },
+      {
+        "model_id": "2102132807240253440",
+        "version_code": 1,
+        "mount_path": "/trisol/input/models/model-1"
+      }
+    ],
+    "output_model_id": "2102210418599526400",
+    "hyperparams_hash": "d8de38a80e839997ec19ae582551c655d763d8716c77a5593a9c00e41b70afff",
+    "stage": "preparing",
+    "substage": "",
+    "reason": "WarmupNotReady",
+    "next": "get",
+    "runtime_observed_at": null,
+    "runtime_stale": false,
+    "gpu_model": "A100-SXM4-80GB",
+    "configured_image": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+    "custom_config": {
+      "image_ref": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+      "command": [
+        "bash",
+        "/trisol/input/models/model-0/bootstrap.sh"
+      ]
+    },
+    "resources": {
+      "gpu_count": 8,
+      "world_size": 8,
+      "cpu": "88",
+      "memory": "1509Gi",
+      "shm": "754Gi",
+      "ephemeral_storage": "50Gi"
+    },
+    "checkpoint_discovery": {
+      "mode": "disabled"
+    },
+    "backoff_limit": 0,
+    "total_cost_minor": null,
+    "cost_missing_reason": null,
+    "cost_as_of": null,
+    "currency": ""
+  }
+}

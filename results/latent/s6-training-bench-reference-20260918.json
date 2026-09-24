@@ -1,0 +1,18 @@
+{
+  "job_id": "2100846145247907840",
+  "attempt": 0,
+  "reports": [
+    {
+      "backend": "reference",
+      "microbatch": 1,
+      "tokens": 256,
+      "objective": 0.033323596231639385,
+      "grad_norm": 1.1077394485473633,
+      "teacher_seconds": 0.8512979922816157,
+      "replay_seconds": 230.73971668165177,
+      "total_seconds": 231.78966091480106,
+      "peak_gib": 9.252641201019287,
+      "gradient": null
+    }
+  ]
+}

@@ -1,0 +1,207 @@
+{
+ "config": {
+  "model": "/data/erv1n/ouro-depth-20260913/base_model",
+  "prompt": 512,
+  "response": 2048,
+  "rank": 512,
+  "rank_v": 512,
+  "rank1": 512,
+  "gated": 1,
+  "repeats": 2,
+  "output": "/data/erv1n/s6-khop-hgemm-20260923/results/profile-gemm-tf32.json",
+  "history_backend": "gemm-tf32"
+ },
+ "gpu": "NVIDIA A100-SXM4-80GB",
+ "torch": "2.11.0+cu130",
+ "baseline": [
+  {
+   "wall": 13.614,
+   "history_collect_seconds": 0.0,
+   "replay": 15.066,
+   "parallel_forward_seconds": 1.117,
+   "adjoint_seconds": 9.554,
+   "parameter_vjp_seconds": 2.713
+  },
+  {
+   "wall": 17.214,
+   "history_collect_seconds": 0.0,
+   "replay": 15.731,
+   "parallel_forward_seconds": 1.14,
+   "adjoint_seconds": 7.544,
+   "parameter_vjp_seconds": 2.668
+  }
+ ],
+ "peak_gib": 22.03218698501587,
+ "no_history_attention": [
+  {
+   "wall": 1.122,
+   "history_collect_seconds": 0.0,
+   "replay": 1.108,
+   "parallel_forward_seconds": 0.405,
+   "adjoint_seconds": 0.012,
+   "parameter_vjp_seconds": 0.789
+  },
+  {
+   "wall": 1.118,
+   "history_collect_seconds": 0.0,
+   "replay": 1.105,
+   "parallel_forward_seconds": 0.308,
+   "adjoint_seconds": 0.012,
+   "parameter_vjp_seconds": 0.789
+  }
+ ],
+ "history_attention_share_upper_bound": 0.9266560467277313,
+ "cuda_total_s": 8.423206240999862,
+ "top_kernels": [
+  {
+   "name": "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}:",
+   "share": 0.0869,
+   "seconds": 0.732,
+   "calls": 51770
+  },
+  {
+   "name": "ampere_bf16_s16816gemm_bf16_128x256_ldg8_f2f_stages_64x3_tn",
+   "share": 0.0597,
+   "seconds": 0.503,
+   "calls": 2401
+  },
+  {
+   "name": "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_128x128_16x5_tn_align4>(cutlass_80_tensorop_s1688gemm_128x128_16x5_t",
+   "share": 0.0582,
+   "seconds": 0.49,
+   "calls": 9952
+  },
+  {
+   "name": "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, f",
+   "share": 0.057,
+   "seconds": 0.48,
+   "calls": 15121
+  },
+  {
+   "name": "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_128x128_32x3_nn_align4>(cutlass_80_tensorop_s1688gemm_128x128_32x3_n",
+   "share": 0.0554,
+   "seconds": 0.467,
+   "calls": 11206
+  },
+  {
+   "name": "void at::native::vectorized_elementwise_kernel<4, at::native::BinaryFunctor<float, float, float, at::native::binary_inte",
+   "share": 0.0527,
+   "seconds": 0.444,
+   "calls": 21414
+  },
+  {
+   "name": "void at::native::vectorized_elementwise_kernel<4, at::native::bfloat16_copy_kernel_cuda(at::TensorIteratorBase&)::{lambd",
+   "share": 0.0517,
+   "seconds": 0.436,
+   "calls": 25590
+  },
+  {
+   "name": "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::CUDAFunctor_add<float> >(at::",
+   "share": 0.0517,
+   "seconds": 0.435,
+   "calls": 27456
+  },
+  {
+   "name": "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_128x128_32x5_nt_align4>(cutlass_80_tensorop_s1688gemm_128x128_32x5_n",
+   "share": 0.0382,
+   "seconds": 0.322,
+   "calls": 5348
+  },
+  {
+   "name": "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_256x128_32x3_tn_align4>(cutlass_80_tensorop_s1688gemm_256x128_32x3_t",
+   "share": 0.0318,
+   "seconds": 0.268,
+   "calls": 7464
+  },
+  {
+   "name": "ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_64x3_nn",
+   "share": 0.0315,
+   "seconds": 0.265,
+   "calls": 763
+  },
+  {
+   "name": "void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctor_add<float>, std::array<char*, 3ul> >(int, at::",
+   "share": 0.0304,
+   "seconds": 0.256,
+   "calls": 27709
+  },
+  {
+   "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::direct_copy_kernel_cuda(at::T",
+   "share": 0.0276,
+   "seconds": 0.233,
+   "calls": 23390
+  },
+  {
+   "name": "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::(anonymous namespace)::masked",
+   "share": 0.0263,
+   "seconds": 0.221,
+   "calls": 13792
+  },
+  {
+   "name": "void at::native::vectorized_elementwise_kernel<4, at::native::AUnaryFunctor<float, float, float, at::native::binary_inte",
+   "share": 0.0263,
+   "seconds": 0.221,
+   "calls": 23853
+  },
+  {
+   "name": "void at::native::reduce_kernel<512, 1, at::native::ReduceOp<float, at::native::func_wrapper_t<float, at::native::sum_fun",
+   "share": 0.025,
+   "seconds": 0.211,
+   "calls": 17141
+  },
+  {
+   "name": "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_128x64_32x6_nt_align4>(cutlass_80_tensorop_s1688gemm_128x64_32x6_nt_",
+   "share": 0.0205,
+   "seconds": 0.173,
+   "calls": 4584
+  },
+  {
+   "name": "void at::native::(anonymous namespace)::CatArrayBatchedCopy<at::native::(anonymous namespace)::OpaqueType<4u>, unsigned ",
+   "share": 0.0201,
+   "seconds": 0.169,
+   "calls": 2577
+  },
+  {
+   "name": "void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_128x256_32x3_nn_align4>(cutlass_80_tensorop_s1688gemm_128x256_32x3_n",
+   "share": 0.0196,
+   "seconds": 0.165,
+   "calls": 2586
+  },
+  {
+   "name": "Memcpy DtoD (Device -> Device)",
+   "share": 0.0186,
+   "seconds": 0.157,
+   "calls": 45213
+  },
+  {
+   "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl<at::native::direct_copy_kernel_cuda(at::TensorIt",
+   "share": 0.0167,
+   "seconds": 0.141,
+   "calls": 4078
+  },
+  {
+   "name": "ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_32x3_nn",
+   "share": 0.0166,
+   "seconds": 0.14,
+   "calls": 1050
+  },
+  {
+   "name": "void at::native::vectorized_elementwise_kernel<4, at::native::exp_kernel_cuda(at::TensorIteratorBase&)::{lambda()#2}::op",
+   "share": 0.0163,
+   "seconds": 0.137,
+   "calls": 15706
+  },
+  {
+   "name": "ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_32x3_nt",
+   "share": 0.011,
+   "seconds": 0.092,
+   "calls": 480
+  },
+  {
+   "name": "void at::native::(anonymous namespace)::CatArrayBatchedCopy_vectorized<at::native::(anonymous namespace)::OpaqueType<4u>",
+   "share": 0.0091,
+   "seconds": 0.077,
+   "calls": 960
+  }
+ ]
+}

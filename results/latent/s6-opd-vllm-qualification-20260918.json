@@ -1,0 +1,128 @@
+{
+  "job_id": "2100816458844999680",
+  "run_attempt": 7,
+  "reports": [
+    {
+      "distribution": {
+        "positions": 256,
+        "top1_agreement": 0.99609375,
+        "per_prompt_top1": {
+          "0": 0.984375,
+          "1": 1.0,
+          "2": 1.0,
+          "3": 1.0
+        },
+        "mean_kl": 0.00041800523037760495,
+        "p99_kl": 0.0034273392520844936,
+        "max_kl": 0.005367768928408623,
+        "max_tail_mass": 0.005874931812286377,
+        "support": 4096,
+        "mean_abs_logprob_error": 0.049836978349957844,
+        "max_abs_logprob_error": 0.4374990463256836,
+        "ulp_multiple_positions": 124,
+        "zero_error_positions": 0,
+        "gate": {
+          "mean_kl": 0.002,
+          "p99_kl": 0.01,
+          "max_kl": 0.05,
+          "top1": 0.9375
+        },
+        "passed": true,
+        "legacy_passed": false
+      },
+      "version": 0,
+      "prompt_lengths": [
+        66,
+        132,
+        125,
+        147
+      ],
+      "tokens": 256,
+      "worst_positions": [
+        {
+          "position": 4,
+          "old_logp": -2.932004451751709,
+          "replay_logp": -3.050532102584839
+        },
+        {
+          "position": 33,
+          "old_logp": -2.464240312576294,
+          "replay_logp": -2.3505470752716064
+        },
+        {
+          "position": 23,
+          "old_logp": -1.428369164466858,
+          "replay_logp": -1.609665870666504
+        },
+        {
+          "position": 17,
+          "old_logp": -3.5421817302703857,
+          "replay_logp": -3.4226632118225098
+        }
+      ],
+      "max_logp_error": 0.181296706199646,
+      "mean_logp_error": 0.013788321446672303
+    },
+    {
+      "distribution": {
+        "positions": 256,
+        "top1_agreement": 0.98828125,
+        "per_prompt_top1": {
+          "0": 0.96875,
+          "1": 1.0,
+          "2": 0.984375,
+          "3": 1.0
+        },
+        "mean_kl": 0.0003489234732416413,
+        "p99_kl": 0.003071242943406105,
+        "max_kl": 0.0034729449544101954,
+        "max_tail_mass": 0.004740297794342041,
+        "support": 4096,
+        "mean_abs_logprob_error": 0.054073924511636035,
+        "max_abs_logprob_error": 0.7499990463256836,
+        "ulp_multiple_positions": 158,
+        "zero_error_positions": 0,
+        "gate": {
+          "mean_kl": 0.002,
+          "p99_kl": 0.01,
+          "max_kl": 0.05,
+          "top1": 0.9375
+        },
+        "passed": true,
+        "legacy_passed": false
+      },
+      "version": 1,
+      "prompt_lengths": [
+        66,
+        132,
+        125,
+        147
+      ],
+      "tokens": 256,
+      "worst_positions": [
+        {
+          "position": 57,
+          "old_logp": -4.419449329376221,
+          "replay_logp": -4.539891242980957
+        },
+        {
+          "position": 48,
+          "old_logp": -1.5215206146240234,
+          "replay_logp": -1.43666410446167
+        },
+        {
+          "position": 14,
+          "old_logp": -7.605616569519043,
+          "replay_logp": -7.388713836669922
+        },
+        {
+          "position": 27,
+          "old_logp": -1.329591989517212,
+          "replay_logp": -1.423344373703003
+        }
+      ],
+      "max_logp_error": 0.2169027328491211,
+      "mean_logp_error": 0.009942628753346838
+    }
+  ]
+}

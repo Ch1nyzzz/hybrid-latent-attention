@@ -1,0 +1,642 @@
+[
+ {
+  "job": "2100378784749326336",
+  "name": "loop-s6-block-stage1-0916",
+  "status": "succeeded",
+  "created_at": "2026-09-17T00:18:20.207Z",
+  "n": 0,
+  "log_error": "anchor the query with start/end (RFC3339) around the run (code=window_too_large)\n  hint: run `trisol train get 2100378784749326336` for the terminal failure reason, or catch `trisol train logs 2100378784749326336 -f` live next time (code=window_too_large, request_id=ee298ec5f19d8e8c4e620588aa144042)"
+ },
+ {
+  "job": "2100452420373975040",
+  "name": "loop-s6-math-qual-0917",
+  "status": "succeeded",
+  "created_at": "2026-09-17T05:10:56.304Z",
+  "n": 0,
+  "log_error": "anchor the query with start/end (RFC3339) around the run (code=window_too_large)\n  hint: run `trisol train get 2100452420373975040` for the terminal failure reason, or catch `trisol train logs 2100452420373975040 -f` live next time (code=window_too_large, request_id=9317b9d7f807ad03543aff09e5d8d99e)"
+ },
+ {
+  "job": "2100456590179045376",
+  "name": "loop-s6-hf-batch-0917",
+  "status": "succeeded",
+  "created_at": "2026-09-17T05:27:30.482Z",
+  "n": 0,
+  "log_error": "anchor the query with start/end (RFC3339) around the run (code=window_too_large)\n  hint: run `trisol train get 2100456590179045376` for the terminal failure reason, or catch `trisol train logs 2100456590179045376 -f` live next time (code=window_too_large, request_id=66faad9804b5ae0609c02b29b0a4f5f9)"
+ },
+ {
+  "job": "2100461813773639680",
+  "name": "loop-s6-stage1-math500-all-0917",
+  "status": "succeeded",
+  "created_at": "2026-09-17T05:48:15.847Z",
+  "n": 0,
+  "log_error": "anchor the query with start/end (RFC3339) around the run (code=window_too_large)\n  hint: run `trisol train get 2100461813773639680` for the terminal failure reason, or catch `trisol train logs 2100461813773639680 -f` live next time (code=window_too_large, request_id=663acbf8870f004119dbe99b3aea5af4)"
+ },
+ {
+  "job": "2100504501264846848",
+  "name": "loop-s6-stage2-accel-0917",
+  "status": "succeeded",
+  "created_at": "2026-09-17T08:37:53.361Z",
+  "n": 0,
+  "log_error": "anchor the query with start/end (RFC3339) around the run (code=window_too_large)\n  hint: run `trisol train get 2100504501264846848` for the terminal failure reason, or catch `trisol train logs 2100504501264846848 -f` live next time (code=window_too_large, request_id=ceb19e46d995ea61cd26a4f765a8a529)"
+ },
+ {
+  "job": "2100507732791533568",
+  "name": "loop-s6-stage2-checkpoint-0917",
+  "status": "succeeded",
+  "created_at": "2026-09-17T08:50:43.789Z",
+  "n": 0,
+  "log_error": "anchor the query with start/end (RFC3339) around the run (code=window_too_large)\n  hint: run `trisol train get 2100507732791533568` for the terminal failure reason, or catch `trisol train logs 2100507732791533568 -f` live next time (code=window_too_large, request_id=8fc1977f1431ceef7e4b3691ed33bcfb)"
+ },
+ {
+  "job": "2100512548506836992",
+  "name": "loop-s6-c256-parallel-0917",
+  "status": "succeeded",
+  "created_at": "2026-09-17T09:09:51.943Z",
+  "n": 0,
+  "log_error": "anchor the query with start/end (RFC3339) around the run (code=window_too_large)\n  hint: run `trisol train get 2100512548506836992` for the terminal failure reason, or catch `trisol train logs 2100512548506836992 -f` live next time (code=window_too_large, request_id=c3440fd84033f3032068762a0e2d23ba)"
+ },
+ {
+  "job": "2100516268833509376",
+  "name": "loop-s6-c256-large-0917",
+  "status": "succeeded",
+  "created_at": "2026-09-17T09:24:38.959Z",
+  "n": 0,
+  "log_error": "anchor the query with start/end (RFC3339) around the run (code=window_too_large)\n  hint: run `trisol train get 2100516268833509376` for the terminal failure reason, or catch `trisol train logs 2100516268833509376 -f` live next time (code=window_too_large, request_id=6cd94a77f5be054fb8ecdda933bea87f)"
+ },
+ {
+  "job": "2100620825416695808",
+  "name": "loop-s6-c256-stage2-0917",
+  "status": "succeeded",
+  "created_at": "2026-09-17T16:20:07.19Z",
+  "n": 0,
+  "log_error": "anchor the query with start/end (RFC3339) around the run (code=window_too_large)\n  hint: run `trisol train get 2100620825416695808` for the terminal failure reason, or catch `trisol train logs 2100620825416695808 -f` live next time (code=window_too_large, request_id=7999cdca23a8e7a6c86770e2a7eb2091)"
+ },
+ {
+  "job": "2100633334768992256",
+  "name": "loop-s6-inference-compare-0917",
+  "status": "succeeded",
+  "created_at": "2026-09-17T17:09:49.652Z",
+  "n": 0,
+  "log_error": "anchor the query with start/end (RFC3339) around the run (code=window_too_large)\n  hint: run `trisol train get 2100633334768992256` for the terminal failure reason, or catch `trisol train logs 2100633334768992256 -f` live next time (code=window_too_large, request_id=d98d5c022b9dc4dbdd1581ff9d0bd125)"
+ },
+ {
+  "job": "2100724832147615744",
+  "name": "loop-s6-vllm-fused-v5-0917",
+  "status": "succeeded",
+  "created_at": "2026-09-17T23:13:24.3Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2100741664556462080",
+  "name": "loop-s6-vllm-peak-0917",
+  "status": "succeeded",
+  "created_at": "2026-09-18T00:20:17.487Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2100758774330425344",
+  "name": "loop-s6-stage2-vllm-math-0918",
+  "status": "succeeded",
+  "created_at": "2026-09-18T01:28:16.779Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2100763341810040832",
+  "name": "loop-s6-stage2-all-b-0918",
+  "status": "canceled",
+  "created_at": "2026-09-18T01:46:25.754Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2100846145247907840",
+  "name": "loop-s6-training-bench-0918",
+  "status": "succeeded",
+  "created_at": "2026-09-18T07:15:27.724Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2100858191423217664",
+  "name": "loop-s6-mb32-capacity-0918",
+  "status": "succeeded",
+  "created_at": "2026-09-18T08:03:19.636Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2100987623924314112",
+  "name": "loop-s6-opd-step10-math500-0918",
+  "status": "canceled",
+  "created_at": "2026-09-18T16:37:38.718Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2100987655335456768",
+  "name": "loop-s6-stage3-step10-math500-0918",
+  "status": "canceled",
+  "created_at": "2026-09-18T16:37:46.211Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2100989626670919680",
+  "name": "loop-s6-opd-step10-math500-ready-0918",
+  "status": "succeeded",
+  "created_at": "2026-09-18T16:45:36.237Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2100989659361325056",
+  "name": "loop-s6-stage3-step10-math500-ready-0918",
+  "status": "succeeded",
+  "created_at": "2026-09-18T16:45:44.016Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2101023424968142848",
+  "name": "loop-s6-replay-memory-0918",
+  "status": "succeeded",
+  "created_at": "2026-09-18T18:59:54.354Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2101029755364061184",
+  "name": "loop-s6-replay-full32-0918",
+  "status": "succeeded",
+  "created_at": "2026-09-18T19:25:03.773Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2101129849761443840",
+  "name": "loop-s6-stage1-khop23-0919",
+  "status": "succeeded",
+  "created_at": "2026-09-19T02:02:48.049Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2101184439995334656",
+  "name": "loop-s6-cache-qualify-v2-0919",
+  "status": "succeeded",
+  "created_at": "2026-09-19T05:39:43.565Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2101211092456845312",
+  "name": "loop-s6-cache-qualify-v4-0919",
+  "status": "succeeded",
+  "created_at": "2026-09-19T07:25:37.801Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2101212460567506944",
+  "name": "loop-s6-mround-bench-0919",
+  "status": "succeeded",
+  "created_at": "2026-09-19T07:31:03.989Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2101216846836412416",
+  "name": "loop-s6-m2-batch-bench-0919",
+  "status": "succeeded",
+  "created_at": "2026-09-19T07:48:29.745Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2101884954681020416",
+  "name": "loop-s6-position-diag-0921",
+  "status": "succeeded",
+  "created_at": "2026-09-21T04:03:19.178Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2101931197373353984",
+  "name": "loop-s6-stage1-k1024v1024-m100-0921",
+  "status": "succeeded",
+  "created_at": "2026-09-21T07:07:04.253Z",
+  "n": 6,
+  "log_error": null
+ },
+ {
+  "job": "2102098999107391488",
+  "name": "loop-s6-diagnostic-suite-0921",
+  "status": "succeeded",
+  "created_at": "2026-09-21T18:13:51.348Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102132819265327104",
+  "name": "loop-s6-stage1-gated-k512v512-0921",
+  "status": "succeeded",
+  "created_at": "2026-09-21T20:28:14.694Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102137925654282240",
+  "name": "loop-s6-sft-base-0921",
+  "status": "succeeded",
+  "created_at": "2026-09-21T20:48:32.177Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102210430586851328",
+  "name": "loop-s6-gated-stage1-math-0922",
+  "status": "succeeded",
+  "created_at": "2026-09-22T01:36:38.691Z",
+  "n": 6,
+  "log_error": null
+ },
+ {
+  "job": "2102234537512677376",
+  "name": "loop-s6-stage1-gated-resume800-0922",
+  "status": "failed",
+  "created_at": "2026-09-22T03:12:26.307Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102257644113764352",
+  "name": "loop-s6-stage1-gated-resume800-step700-0922",
+  "status": "succeeded",
+  "created_at": "2026-09-22T04:44:15.161Z",
+  "n": 2,
+  "log_error": null
+ },
+ {
+  "job": "2102267572140384256",
+  "name": "loop-s6-stage1-gated-step800-0922",
+  "status": "canceled",
+  "created_at": "2026-09-22T05:23:42.194Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102280298254311424",
+  "name": "loop-s6-sft-base-math-0922",
+  "status": "succeeded",
+  "created_at": "2026-09-22T06:14:16.326Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102280542794817536",
+  "name": "loop-s6-sft-latent-0922-lr1e5",
+  "status": "canceled",
+  "created_at": "2026-09-22T06:15:14.599Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102286177674469376",
+  "name": "loop-s6-sft-latent-0922-k1024",
+  "status": "canceled",
+  "created_at": "2026-09-22T06:37:38.058Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102289117889966080",
+  "name": "loop-s6-stage1-k1024v512-m100-0922",
+  "status": "failed",
+  "created_at": "2026-09-22T06:49:19.332Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102435800196063232",
+  "name": "loop-s6-stage1-k512v512-r1-512-0922",
+  "status": "failed",
+  "created_at": "2026-09-22T16:32:10.93Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102439244944384000",
+  "name": "loop-s6-sft-latent-0922-k1024-multipass",
+  "status": "failed",
+  "created_at": "2026-09-22T16:45:52.17Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102439598209638400",
+  "name": "loop-s6-stage1-k512v512-r1-512-0922b",
+  "status": "failed",
+  "created_at": "2026-09-22T16:47:16.395Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102449951232499712",
+  "name": "loop-s6-stage1-k512v512-r1-512-0922c",
+  "status": "failed",
+  "created_at": "2026-09-22T17:28:24.809Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102450097676627968",
+  "name": "loop-s6-sft-latent-0922-k1024-mb2",
+  "status": "failed",
+  "created_at": "2026-09-22T17:28:59.909Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102456703860617216",
+  "name": "loop-s6-stage1-k512v512-r1-512-0922d",
+  "status": "failed",
+  "created_at": "2026-09-22T17:55:14.912Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102456803869601792",
+  "name": "loop-s6-sft-latent-0922-k1024-mb1",
+  "status": "failed",
+  "created_at": "2026-09-22T17:55:38.737Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102472495188680704",
+  "name": "loop-s6-sft-latent-0922-k1024-ckpt",
+  "status": "canceled",
+  "created_at": "2026-09-22T18:57:59.661Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102492536957313024",
+  "name": "loop-s6-sft-latent-0922-k1024-triton-mb4",
+  "status": "canceled",
+  "created_at": "2026-09-22T20:17:37.975Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102521083943985152",
+  "name": "loop-s6-history-gemm-bench-0923",
+  "status": "succeeded",
+  "created_at": "2026-09-22T22:11:04.082Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102557538137419776",
+  "name": "loop-s6-stage1-k512v512-r1-512-1000step-0923",
+  "status": "failed",
+  "created_at": "2026-09-23T00:35:55.678Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102560499873886208",
+  "name": "loop-s6-stage1-gated-res-k512v512-r1-512-1000step-0923",
+  "status": "canceled",
+  "created_at": "2026-09-23T00:47:41.808Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102569643397881856",
+  "name": "loop-s6-stage1-gated-res-k512v512-r1-512-1000step-0923b",
+  "status": "succeeded",
+  "created_at": "2026-09-23T01:24:01.584Z",
+  "n": 10,
+  "log_error": null
+ },
+ {
+  "job": "2102657787698880512",
+  "name": "loop-s6-stage1-k512v512-r1-512-1000step-0923c",
+  "status": "succeeded",
+  "created_at": "2026-09-23T07:14:16.847Z",
+  "n": 10,
+  "log_error": null
+ },
+ {
+  "job": "2102680718994845696",
+  "name": "loop-s6-opd-fkl-gated-s700-0923",
+  "status": "canceled",
+  "created_at": "2026-09-23T08:45:24.167Z",
+  "n": 1,
+  "log_error": null
+ },
+ {
+  "job": "2102726384911654912",
+  "name": "loop-s6-stage1-k1024v512-r1-256-600step-0923",
+  "status": "failed",
+  "created_at": "2026-09-23T11:46:51.896Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102755270311550976",
+  "name": "loop-s6-serving-kl-diag-k1024-0923",
+  "status": "succeeded",
+  "created_at": "2026-09-23T13:41:38.976Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102790145764761600",
+  "name": "loop-s6-stage1-k1024v512-r1-256-600step-0923b",
+  "status": "canceled",
+  "created_at": "2026-09-23T16:00:13.624Z",
+  "n": 1,
+  "log_error": null
+ },
+ {
+  "job": "2102791701885100032",
+  "name": "loop-s6-opd-fkl-gemm-plain-s1000-0923",
+  "status": "canceled",
+  "created_at": "2026-09-23T16:06:24.669Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102792845315284992",
+  "name": "loop-s6-opd-fkl-latent-lr1e4-plain-s1000-0923",
+  "status": "failed",
+  "created_at": "2026-09-23T16:10:57.274Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102824974791225344",
+  "name": "loop-s6-opd-fkl-latent-lr3e5wu10-plain-s1000-0923",
+  "status": "canceled",
+  "created_at": "2026-09-23T18:18:37.456Z",
+  "n": 8,
+  "log_error": null
+ },
+ {
+  "job": "2102831425957933056",
+  "name": "loop-s6-stage1-k1024v512-r1-256-600step-0923b-resume200",
+  "status": "succeeded",
+  "created_at": "2026-09-23T18:44:15.499Z",
+  "n": 5,
+  "log_error": null
+ },
+ {
+  "job": "2102897300480208896",
+  "name": "loop-s6-window-math-opd30-0923",
+  "status": "succeeded",
+  "created_at": "2026-09-23T23:06:01.231Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102898286472998912",
+  "name": "loop-s6-stage1-k512v512-r1-256-600step-baseline-0923",
+  "status": "canceled",
+  "created_at": "2026-09-23T23:09:56.32Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102899103955431424",
+  "name": "loop-s6-rank-sweep-analysis-0923",
+  "status": "succeeded",
+  "created_at": "2026-09-23T23:13:11.362Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102903731585556480",
+  "name": "loop-s6-window-math-kv1024-s600-0923",
+  "status": "succeeded",
+  "created_at": "2026-09-23T23:31:34.624Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102919177542053888",
+  "name": "loop-s6-stage1-k256v256-r1-256-600step-0923",
+  "status": "failed",
+  "created_at": "2026-09-24T00:32:57.118Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102920401762922496",
+  "name": "loop-s6-window-residual-diag-0923",
+  "status": "succeeded",
+  "created_at": "2026-09-24T00:37:48.988Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102930473201184768",
+  "name": "loop-s6-stage1-k256v256-r1-256-600step-0923b",
+  "status": "succeeded",
+  "created_at": "2026-09-24T01:17:50.226Z",
+  "n": 6,
+  "log_error": null
+ },
+ {
+  "job": "2102931358253850624",
+  "name": "loop-s6-stage1-k512v512-r1-256-w32-600step-0924",
+  "status": "failed",
+  "created_at": "2026-09-24T01:21:21.301Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2102965143250939904",
+  "name": "loop-s6-stage1-k512v512-r1-256-w32-resume100-0924",
+  "status": "canceled",
+  "created_at": "2026-09-24T03:35:36.193Z",
+  "n": 0,
+  "log_error": "Error: job \"2102965143250939904\" has no recorded pod identity yet; nothing to query (code=E_ERROR)"
+ },
+ {
+  "job": "2102965662258311168",
+  "name": "loop-s6-stage1-k512v512-r1-256-w32-resume100-v2-0924",
+  "status": "succeeded",
+  "created_at": "2026-09-24T03:37:39.957Z",
+  "n": 6,
+  "log_error": null
+ },
+ {
+  "job": "2102989986428100608",
+  "name": "loop-s6-opd-fkl-w32-w32-s100-0924",
+  "status": "canceled",
+  "created_at": "2026-09-24T05:14:19.355Z",
+  "n": 6,
+  "log_error": null
+ },
+ {
+  "job": "2103028171241689088",
+  "name": "loop-s6-stage1-k512v512-r1-512-w32-600sched-stop200-eval20-0924",
+  "status": "succeeded",
+  "created_at": "2026-09-24T07:46:03.212Z",
+  "n": 10,
+  "log_error": null
+ },
+ {
+  "job": "2103073688986329088",
+  "name": "loop-s6-opd-fkl-w32-lr1e5-w32-s100-0924",
+  "status": "canceled",
+  "created_at": "2026-09-24T10:46:55.556Z",
+  "n": 4,
+  "log_error": null
+ },
+ {
+  "job": "2103161112533934080",
+  "name": "loop-s6-l20-eval-w32-k512r256-s100-0924",
+  "status": "canceled",
+  "created_at": "2026-09-24T16:34:18.917Z",
+  "n": 0,
+  "log_error": "hit; back off poll loops (10 queries/min, 2 concurrent per user) (code=rate_limited)\n  hint: run `trisol train get 2103161112533934080` for the terminal failure reason, or catch `trisol train logs 2103161112533934080 -f` live next time (code=rate_limited, request_id=bf433a5d47cc3f013d9d761364003f03)"
+ },
+ {
+  "job": "2103164765361680384",
+  "name": "loop-s6-opd-fkl-w32-lr1e5-r4096-w32-s100-0924",
+  "status": "canceled",
+  "created_at": "2026-09-24T16:48:49.897Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2103223077369290752",
+  "name": "loop-s6-opd-fkl-w32-lr1e5-r4096-w32p-s100-0924",
+  "status": "running",
+  "created_at": "2026-09-24T20:40:32.483Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2103230040463388672",
+  "name": "loop-s6-stage1-k512v512-r256-w128-stop200-eval20-0924",
+  "status": "canceled",
+  "created_at": "2026-09-24T21:08:12.721Z",
+  "n": 0,
+  "log_error": null
+ },
+ {
+  "job": "2103232731965042688",
+  "name": "loop-s6-stage1-k512v512-r256-w128-stop200-xeval20-0924",
+  "status": "running",
+  "created_at": "2026-09-24T21:18:54.502Z",
+  "n": 0,
+  "log_error": null
+ }
+]

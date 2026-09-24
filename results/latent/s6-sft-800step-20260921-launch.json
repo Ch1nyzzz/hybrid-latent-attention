@@ -1,0 +1,191 @@
+{
+  "submitted_at_utc": "2026-09-21T20:48:40.124026+00:00",
+  "code_asset": "loop-s6-sft-code-0921:2",
+  "dataset": "loop-s6-sft-math-20260921:1",
+  "steps": 800,
+  "jobs": {
+    "base": {
+      "gpu_product_id": "2099127850496946176",
+      "gpu_display_name": "NVIDIA A100-SXM4-80GB",
+      "gpu_product_deleted": false,
+      "id": "2102137925654282240",
+      "team_id": "2074426702489989120",
+      "team_name": "hal9k-metis",
+      "created_by": "2074771312227647488",
+      "created_by_name": "\u5f20\u601d\u8fdc",
+      "updated_by": "2074771312227647488",
+      "updated_by_name": "\u5f20\u601d\u8fdc",
+      "created_at": "2026-09-21T20:48:32.177Z",
+      "updated_at": "2026-09-21T20:48:32.529Z",
+      "name": "loop-s6-sft-base-0921",
+      "description": "Task-driven SFT mathematical reasoning: BASE arm (GB128, steps 800).",
+      "status": "preparing",
+      "visibility": "team",
+      "shared_team_ids": [],
+      "framework": "custom",
+      "mode": "full",
+      "run_attempt": 0,
+      "cluster_id": "2071581637107265536",
+      "base_model_id": "2099179771119284224",
+      "base_model_version_code": 1,
+      "base_model_mount_path": "/trisol/input/model",
+      "datasets": [
+        {
+          "provider": "wenyon",
+          "dataset_id": "",
+          "version_code": 0,
+          "wenyon_id": "loop-s6-sft-math-20260921",
+          "dataset_name": "loop-s6-sft-math-20260921",
+          "mount_path": "/trisol/input/datasets/ds-0"
+        },
+        {
+          "provider": "wenyon",
+          "dataset_id": "",
+          "version_code": 0,
+          "wenyon_id": "loop-scale-wheels-tf456",
+          "dataset_name": "loop-scale-wheels-tf456",
+          "mount_path": "/trisol/input/datasets/ds-1"
+        }
+      ],
+      "models": [
+        {
+          "model_id": "2102133369675452416",
+          "version_code": 2,
+          "mount_path": "/trisol/input/models/model-0"
+        }
+      ],
+      "output_model_id": "2102137918024843264",
+      "hyperparams_hash": "607d9b59857f501b63bf134eaccc6bc5903b51dd0b71030729f0e99cf37be609",
+      "stage": "preparing",
+      "substage": "",
+      "reason": "WarmupNotReady",
+      "next": "get",
+      "runtime_observed_at": null,
+      "runtime_stale": false,
+      "gpu_model": "A100-SXM4-80GB",
+      "configured_image": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+      "custom_config": {
+        "image_ref": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+        "command": [
+          "bash",
+          "/trisol/input/models/model-0/bootstrap.sh",
+          "base",
+          "800"
+        ]
+      },
+      "resources": {
+        "gpu_count": 8,
+        "world_size": 8,
+        "cpu": "88",
+        "memory": "1509Gi",
+        "shm": "754Gi",
+        "ephemeral_storage": "50Gi"
+      },
+      "checkpoint_discovery": {
+        "mode": "disabled"
+      },
+      "backoff_limit": 0,
+      "next_steps": [
+        "wait for capacity, try a different gpu_model, or request more quota"
+      ],
+      "total_cost_minor": null,
+      "cost_missing_reason": null,
+      "cost_as_of": null,
+      "currency": ""
+    },
+    "latent": {
+      "gpu_product_id": "2099127850496946176",
+      "gpu_display_name": "NVIDIA A100-SXM4-80GB",
+      "gpu_product_deleted": false,
+      "id": "2102137956184621056",
+      "team_id": "2074426702489989120",
+      "team_name": "hal9k-metis",
+      "created_by": "2074771312227647488",
+      "created_by_name": "\u5f20\u601d\u8fdc",
+      "updated_by": "2074771312227647488",
+      "updated_by_name": "\u5f20\u601d\u8fdc",
+      "created_at": "2026-09-21T20:48:39.438Z",
+      "updated_at": "2026-09-21T20:48:39.931Z",
+      "name": "loop-s6-sft-latent-0921",
+      "description": "Task-driven SFT mathematical reasoning: LATENT arm (GB128, steps 800).",
+      "status": "preparing",
+      "visibility": "team",
+      "shared_team_ids": [],
+      "framework": "custom",
+      "mode": "full",
+      "run_attempt": 0,
+      "cluster_id": "2071581637107265536",
+      "base_model_id": "2099179771119284224",
+      "base_model_version_code": 1,
+      "base_model_mount_path": "/trisol/input/model",
+      "datasets": [
+        {
+          "provider": "wenyon",
+          "dataset_id": "",
+          "version_code": 0,
+          "wenyon_id": "loop-s6-sft-math-20260921",
+          "dataset_name": "loop-s6-sft-math-20260921",
+          "mount_path": "/trisol/input/datasets/ds-0"
+        },
+        {
+          "provider": "wenyon",
+          "dataset_id": "",
+          "version_code": 0,
+          "wenyon_id": "loop-scale-wheels-tf456",
+          "dataset_name": "loop-scale-wheels-tf456",
+          "mount_path": "/trisol/input/datasets/ds-1"
+        }
+      ],
+      "models": [
+        {
+          "model_id": "2102133369675452416",
+          "version_code": 2,
+          "mount_path": "/trisol/input/models/model-0"
+        },
+        {
+          "model_id": "2100377921834192896",
+          "version_code": 1,
+          "mount_path": "/trisol/input/models/model-1"
+        }
+      ],
+      "output_model_id": "2102137948630679552",
+      "hyperparams_hash": "8416b3b8b5fbeaeed22e974d001a1cb4cb3920e0e1c684e991f99b811621b3bc",
+      "stage": "preparing",
+      "substage": "",
+      "reason": "WarmupNotReady",
+      "next": "get",
+      "runtime_observed_at": null,
+      "runtime_stale": false,
+      "gpu_model": "A100-SXM4-80GB",
+      "configured_image": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+      "custom_config": {
+        "image_ref": "registry.dp.tech/dptech/dp/native/prod-1760009/11106/verl-coding:202608292148",
+        "command": [
+          "bash",
+          "/trisol/input/models/model-0/bootstrap.sh",
+          "latent",
+          "800"
+        ]
+      },
+      "resources": {
+        "gpu_count": 8,
+        "world_size": 8,
+        "cpu": "88",
+        "memory": "1509Gi",
+        "shm": "754Gi",
+        "ephemeral_storage": "50Gi"
+      },
+      "checkpoint_discovery": {
+        "mode": "disabled"
+      },
+      "backoff_limit": 0,
+      "next_steps": [
+        "wait for capacity, try a different gpu_model, or request more quota"
+      ],
+      "total_cost_minor": null,
+      "cost_missing_reason": null,
+      "cost_as_of": null,
+      "currency": ""
+    }
+  }
+}

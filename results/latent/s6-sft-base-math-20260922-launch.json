@@ -1,0 +1,30 @@
+{
+  "task": "Task B: SFT Base Model (step 800) Fast vLLM MATH-500 Evaluation",
+  "job_id": "2102234344960569344",
+  "job_name": "loop-s6-sft-base-math-0922",
+  "submitted_at": "2026-09-22T03:11:40Z",
+  "status": "preparing",
+  "gpus": 8,
+  "gpu_spec": "NVIDIA A100-SXM4-80GB",
+  "cluster": "w1 (2071581637107265536)",
+  "team": "hal9k-metis",
+  "base_model": "ouro-1-4b:1",
+  "source_model": {
+    "job_id": "2102137925654282240",
+    "job_name": "loop-s6-sft-base-0921",
+    "output_model": "loop-s6-sft-base-output-0921:1",
+    "checkpoint_file": "sft/base_model-800.pt",
+    "step": 800
+  },
+  "eval_config": {
+    "dataset": "ouro_depth/matheval/data/math500.jsonl",
+    "n_problems": 500,
+    "engine": "fast vLLM FULL_DECODE_ONLY CUDA graphs",
+    "n": 1,
+    "temperature": 1.0,
+    "top_p": 0.7,
+    "max_new": 8192,
+    "shards": 8
+  },
+  "output_model": "loop-s6-sft-base-math-results-0922"
+}

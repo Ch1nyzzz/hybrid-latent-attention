@@ -1,0 +1,18 @@
+{
+  "scope": "isolated full-parameter trainer Phase A and checkpoint component tests",
+  "worktree": "artifacts/opd-fullparam-work",
+  "base_asset": "loop-s6-khop3-code-0919:17",
+  "result": {
+    "passed": 33,
+    "skipped": 4,
+    "deselected": 11
+  },
+  "device": "CPU",
+  "torch": "2.8.0",
+  "transformers": "4.56.2",
+  "online_full_parameter_enabled": false,
+  "cloud_jobs_modified": false,
+  "additional_fix": "Disable no-grad snapshot autocast weight cache to retain replay LM-head gradients",
+  "report": "ouro_depth/S6_FULL_PARAM_OPD_PHASE_A_20260919.md",
+  "patch": "artifacts/opd-fullparam-phase-a.patch"
+}

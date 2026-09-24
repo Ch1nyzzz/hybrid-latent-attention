@@ -1,0 +1,40 @@
+{
+  "task": "SFT Base Model (step 800) Fast vLLM MATH-500 Evaluation",
+  "evaluated_at": "2026-09-22T06:41:00Z",
+  "source_model": {
+    "job_id": "2102137925654282240",
+    "job_name": "loop-s6-sft-base-0921",
+    "output_model": "loop-s6-sft-base-output-0921:1",
+    "checkpoint_file": "sft/base_model-800.pt",
+    "step": 800,
+    "lr": 1e-05
+  },
+  "eval_job": {
+    "id": "2102280298254311424",
+    "name": "loop-s6-sft-base-math-0922",
+    "cluster": "w1 (2071581637107265536)",
+    "gpus": 8,
+    "gpu_model": "NVIDIA A100-SXM4-80GB",
+    "wall_seconds": 1248.96
+  },
+  "protocol": {
+    "benchmark": "MATH-500",
+    "engine": "fast vLLM FULL_DECODE_ONLY CUDA graphs",
+    "n": 1,
+    "temperature": 1.0,
+    "top_p": 0.7,
+    "seed": 20260915,
+    "max_new": 8192,
+    "max_model_len": 10240,
+    "shards": 8
+  },
+  "results": {
+    "n_problems": 500,
+    "total_samples": 500,
+    "correct": 396,
+    "accuracy": 0.792,
+    "pass_at_1": 0.792,
+    "mean_tokens": 2732.494,
+    "trunc_rate": 0.046
+  }
+}

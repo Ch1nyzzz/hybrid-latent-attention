@@ -1,0 +1,28 @@
+{
+  "job_id": "2100758774330425344",
+  "job_name": "loop-s6-stage2-vllm-math-0918",
+  "source_git_head": "414b55b3188b45f8173f5f80468f2944a4ffe4c9",
+  "code_asset": "loop-s6-math-code-0917:7",
+  "archive_sha256": "657c43c1a87e85fda094544c8a111d07bc1626ce98f58fd87ed830b1af4ea9a0",
+  "student_asset": "loop-s6-c256-stage2-0917:1",
+  "student_file": "student-600.pt",
+  "gpus": 8,
+  "qualification": "checkpoint-specific HF reference, FDO greedy stream comparison and fixed-prefix KL; all must pass before MATH500",
+  "protocol": {
+    "problems": 500,
+    "samples_per_problem": 4,
+    "temperature": 1.0,
+    "top_p": 0.7,
+    "max_new_tokens": 8192,
+    "max_model_len": 10240,
+    "shards": 8,
+    "max_num_seqs_per_gpu": 32,
+    "request_batch": 8,
+    "seed": 0,
+    "backend": "TRITON_ATTN",
+    "cudagraph_mode": "FULL_DECODE_ONLY",
+    "compilation_mode": 0,
+    "prompt_chunk_size": 0
+  },
+  "results_pending": true
+}

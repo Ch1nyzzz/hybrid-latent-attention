@@ -1,0 +1,41 @@
+{
+  "task": "S6 Stage 1 K1024/V512 600-step training with MATH-500 intervals",
+  "job_id": "2102289117889966080",
+  "job_name": "loop-s6-stage1-k1024v512-m100-0922",
+  "submitted_at": "2026-09-22T06:49:19.332Z",
+  "status": "preparing",
+  "cluster": "w1 (2071581637107265536)",
+  "gpus": 8,
+  "gpu_product_id": "2099127850496946176",
+  "gpu_spec": "NVIDIA A100-SXM4-80GB",
+  "team": "hal9k-metis",
+  "geometry": {
+    "rank_k": 1024,
+    "rank_v": 512,
+    "rank1": 256,
+    "logical_cache_kib_per_token": 96
+  },
+  "training_config": {
+    "base_model": "ouro-1-4b:1",
+    "code_asset": "loop-s6-rank-ablation-code-0920:4",
+    "corpus": "loop-s5-expanded-corpus-packed-20260916:1",
+    "wheels": "loop-scale-wheels-tf456:2",
+    "steps": 600,
+    "warmup_steps": 50,
+    "lr": 0.001,
+    "global_batch_size": 128,
+    "micro_batch_size": 4,
+    "seed": 20260915
+  },
+  "eval_config": {
+    "intervals": [100, 200, 300, 400, 500, 600],
+    "benchmark": "MATH-500",
+    "n": 1,
+    "temperature": 1.0,
+    "top_p": 0.7,
+    "max_new": 8192,
+    "shards": 8,
+    "serving_max_kl": 0.06
+  },
+  "output_model": "loop-s6-stage1-k1024v512-m100-0922 (2102289106733113344)"
+}

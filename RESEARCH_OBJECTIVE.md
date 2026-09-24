@@ -4,7 +4,7 @@
 
 ## 当前实现边界（2026-09-16）
 
-长期目标不变；当前里程碑以 [S6 计划](ouro_depth/S6_BLOCK_WRITER_RECIPE_20260916.md) 为执行规范：固定 T=4 的终态 block writer、第一轮独立 latent、当前 chunk 精确 K/V 与历史直接 latent attention。本文下述第一版 gated/decoupled-RoPE 架构及随机 writer-depth 训练属于历史设计，相关旧训练实现已移除。S6 的可训练 dense reader 只在 PCA 初始化时保证频率对齐，尚未证明训练后严格等变或 adaptive-depth 能力。
+长期目标不变；当前方法与证据见 [S6 方法报告](ouro_depth/S6_METHOD_REPORT.md)：固定 T=4 的终态 block writer、第一轮独立 latent、当前 chunk 精确 K/V 与历史直接 latent attention。本文下述第一版 gated/decoupled-RoPE 架构及随机 writer-depth 训练属于历史设计，相关旧训练实现已移除。S6 的可训练 dense reader 只在 PCA 初始化时保证频率对齐，尚未证明训练后严格等变或 adaptive-depth 能力。
 
 ## 1. 一句话目标
 

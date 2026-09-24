@@ -1,0 +1,17 @@
+{
+  "id": "2100846145247907840",
+  "status": "preparing",
+  "run_attempt": 3,
+  "patch_sha256": "b059bc4f4bf5f91547a291885f83b7e74e512e63f5c0e99015f6a30dc4184081",
+  "files": [
+    "ouro_depth/latent/batched_engine.py",
+    "ouro_depth/latent/batched_decode.py",
+    "ouro_depth/latent/decode_training.py",
+    "ouro_depth/latent/train_decode.py",
+    "ouro_depth/latent/serving_replay.py",
+    "ouro_depth/latent/fused_history.py",
+    "ouro_depth/latent/history_kernels.py",
+    "ouro_depth/latent/benchmark_decode_training.py"
+  ],
+  "idempotency_key": "cfb81678-ad89-494d-ae54-7fb86a2e3e96"
+}

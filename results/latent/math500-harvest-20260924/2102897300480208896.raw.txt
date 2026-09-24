@@ -1,0 +1,2 @@
+MATH500_WINDOW {"window": 32, "shards": 8, "n": 500, "correct": 346, "accuracy": 0.692, "mean_tokens": 2331.906, "trunc_rate": 0.176, "gen_seconds_per_shard": [290, 256, 238, 246, 272, 229, 256, 240], "preemptions": 0}
+MATH500_WINDOW {"window": 128, "shards": 8, "n": 500, "correct": 357, "accuracy": 0.714, "mean_tokens": 2163.504, "trunc_rate": 0.154, "gen_seconds_per_shard": [285, 249, 228, 246, 257, 215, 246, 245], "preemptions": 0}

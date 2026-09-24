@@ -1,0 +1,38 @@
+{
+  "created_at": "2026-09-18T16:45:27.306911+00:00",
+  "code_asset": "loop-s6-math-code-0917:11",
+  "archive_sha256": "0b6e15c359b5ab4839c213ac51218216e10a94b51fb8689240d03713f4d11012",
+  "protocol": {
+    "problems": 500,
+    "samples_per_problem": 4,
+    "temperature": 1.0,
+    "top_p": 0.7,
+    "max_new": 8192,
+    "max_model_len": 10240,
+    "shards": 8,
+    "seed": 0,
+    "backend": "TRITON_ATTN",
+    "graphs": "FULL_DECODE_ONLY",
+    "active_concurrency": "automatic worst-case KV capacity; same engine max_num_seqs=128"
+  },
+  "jobs": [
+    {
+      "id": "2100989626670919680",
+      "name": "loop-s6-opd-step10-math500-ready-0918",
+      "status": "preparing",
+      "mode": "opd",
+      "student_asset": "loop-s6-direct-opd-0918:1",
+      "step": 10,
+      "gpus": 8
+    },
+    {
+      "id": "2100989659361325056",
+      "name": "loop-s6-stage3-step10-math500-ready-0918",
+      "status": "preparing",
+      "mode": "stage3",
+      "student_asset": "loop-s6-direct-stage3-0918:1",
+      "step": 10,
+      "gpus": 8
+    }
+  ]
+}

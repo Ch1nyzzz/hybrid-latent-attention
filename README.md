@@ -4,24 +4,16 @@
 
 研究方向以 [RESEARCH_OBJECTIVE.md](RESEARCH_OBJECTIVE.md) 为准：目标定义、与 LLA 的边界、RoPE 障碍、第一版架构（recurrent memory register + decoupled RoPE）、第一阶段实验与预注册判据。
 
-## 当前实验：OPD 与 K/V 加宽（2026-09-21）
+## 当前方法（2026-09-24）
 
-当前路线是完成 Stage1 后直接进行 OPD，另设 K1024/V512、K512/V1024 两个重新
-初始化的 Stage1 消融。独立 Stage3 不再作为本次实验入口。
+S6 latent cache：每层每 token 存主 latent（K/V 各 512，由 loop 2–4 的 hidden 写入）和 loop-1 latent（K/V 各 256），
+共 72 KiB/token（精确 KV 为 768 KiB）；attention 直接读 latent，最近 W=32 个位置读精确 K/V。训练只有两步：
+Stage1 注意力蒸馏（带 W 的精确带），然后是短程 OPD（FKL/RKL，K=3 hop replay，history 取自 vLLM rollout）。
+Stage2/3、gated residual 和全参数 OPD 已删除。
 
-OPD 包含 RKL/FKL、K-hop replay、可选 backbone 全参数训练、vLLM 权重同步、
-完整 checkpoint 恢复和每 10 步一次 n=1 MATH500。宽度消融每 100 步评测一次，
-包含非对称权重的推理 padding、数值资格检查和 step8 续跑。
-配置、命令、环境隔离与证据边界见 [OPD 与 K/V 加宽说明](ouro_depth/OPD_KV_EXPERIMENTS.md)。
-
-原 [三阶段计划](ouro_depth/S6_BLOCK_WRITER_RECIPE_20260916.md)及相关入口保留为历史记录。
-下面的 S5 分数也是历史基线，不是当前 OPD 或加宽模型的成绩。
-
-## 已完成评测（2026-09-15）
-
-S5 stage3b 的 8 卡 Triton MATH500 已完成：avg@4 **51.15%**、pass@4 **69.20%**、截断率 **18.75%**，总用时约 **16 分 34 秒**。此次全量 BF16 KV 对照为 75.15% / 86.60%，平均正确率差 **24.00 个百分点**；持久 cache 理论上从 768 降至 72 KiB/token。
-
-[进度、差距与瓶颈分析](ouro_depth/LATENT_PROGRESS_20260915.md)记录了完整指标、协议差异、错误拆分、训练阶段和 τ×t 矩阵。[单卡 cache 诊断](ouro_depth/LATENT_CACHE_DIAGNOSTICS_20260915.md)已确认：真实滚动 teacher KL 比两遍训练代理高约 25%；finalize 时序候选将 HF/vLLM decode KL 降低约 73%；保留跨块计算图能让后块 loss 回传到前块缓存。候选尚未切换到正式评测，不能把这些 KL 改善当成数学正确率提升，或把剩余差距全部归因于 rank=512。
+当前结果（MATH500，n=1）：W32 Stage1 s100 为 **71.8%**，s100–600 平台均值 71.1%；OPD 在 2K rollout 下没有带来增益，4K rollout 仍在运行。
+方法定义、每个设计选择的依据（K/V 512、R256、W=32、K=3 等）、全部分数与 job ID、投稿前的缺口，见
+[S6 方法与证据报告](ouro_depth/S6_METHOD_REPORT.md)。
 
 ## 代码地图
 
@@ -29,19 +21,21 @@ S5 stage3b 的 8 卡 Triton MATH500 已完成：avg@4 **51.15%**、pass@4 **69.2
 |---|---|
 | `ouro_depth/vendor/` | 官方 Ouro-1.4B 架构（revision `574fa66…`），不修改 |
 | `ouro_depth/model.py` | 指定循环深度的 Ouro 前向封装，可返回各深度 hidden state |
-| `ouro_depth/shared_decode_cache.py` | HF 参考实现：decode 期让浅层 loop 读最后一轮 KV（负对照，已证明会崩） |
+| `ouro_depth/shared_decode_cache.py` | 负对照：decode 期让浅层 loop 读最后一轮 KV（已证明会崩） |
 | `ouro_depth/vllm_kvshare/` | 同一方案的 vLLM 0.26 实现、对拍与吞吐测试；hybrid KV 管理可复用于新 cache 的 serving |
 | `ouro_depth/matheval/` | vLLM 数学评测（MATH500 / AIME24 / AIME25 / HMMT / BeyondAIME）与判分 |
-| `ouro_depth/latent/train_stage1_recipe.py` | 新语料 Stage1 蒸馏、多卡训练与恢复 |
-| `ouro_depth/latent/train_recipe.py` | 历史 S6 Stage2/3 训练与恢复 |
-| `ouro_depth/latent/train_decode.py` | Stage1 → OPD（RKL/FKL），K-hop replay 与可选全参数训练 |
-| `ouro_depth/trisol/run_stage1_math_intervals.py` | K/V 加宽 Stage1 与间隔 MATH500 |
+| `ouro_depth/latent/register.py` | S6 writer/reader 定义与 cache 行布局 |
+| `ouro_depth/latent/train_stage1_recipe.py` / `train_stage1.py` | Stage1 注意力蒸馏（`--exact-window` 精确带）、多卡训练与恢复 |
+| `ouro_depth/latent/train_decode.py` / `khop_replay.py` | Stage1 → OPD（FKL/RKL），rollout history 上的 K-hop replay |
+| `ouro_depth/trisol/run_stage1_math_intervals.py` / `run_opd.sh` / `eval_checkpoints.py` | trisol 上的 Stage1（含 K/V 宽度消融）、OPD、仅评测入口 |
+| `ouro_depth/latent/train_sft.py` / `sft_replay.py` | SFT 线（base 或 backbone+latent 全参数） |
+| `ouro_depth/lla/`、`ouro_depth/vllm_latent/ouro_lla.py` | LLA 基线复现（HF 与 vLLM absorb） |
 | `ouro_depth/latent/corpus_index.py` / `prepare_recipe_data.py` | 文档级数据划分、来源采样与恢复游标 |
 | `ouro_depth/latent/batched_engine.py` / `rolling_engine.py` | Latent prefill、真实 rolling decode 与训练计算图 |
 | `ouro_depth/vllm_latent/` | S6 latent cache 的 vLLM 0.26 融合 serving 路径（Triton 分页历史 + FA2 当前块 + LSE 合并，FULL_DECODE_ONLY CUDA graph）、HF 对拍/资格门与 base-vs-S6 吞吐套件；trisol 资格已通过，吞吐见 `INFERENCE_COMPARISON_20260917.md` |
 | `ouro_depth/tests/` | 数值、数据、梯度路径及恢复检查 |
 
-## 已有基线（Ouro-1.4B base，exact KV，8K 上限，2026-09-14）
+## 已有基线（Ouro-1.4B base，exact KV，8K 上限，2026-09-14；与 S6 的 n=1 协议不同）
 
 | 深度 | MATH500 avg@4 | AIME24 avg@16 | 每 token cache |
 |---|---|---|---|

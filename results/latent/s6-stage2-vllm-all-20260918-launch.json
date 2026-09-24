@@ -1,0 +1,23 @@
+{
+  "jobs": [
+    {
+      "id": "2100763642113830912",
+      "name": "loop-s6-stage2-all-a-frozen-0918",
+      "steps": "2,50,150,250,350,450,550",
+      "status": "preparing"
+    },
+    {
+      "id": "2100763669347434496",
+      "name": "loop-s6-stage2-all-b-frozen-0918",
+      "steps": "4,100,200,300,400,500",
+      "status": "preparing"
+    }
+  ],
+  "existing_step600_job": "2100758774330425344",
+  "code_asset": "loop-s6-math-code-0917:9",
+  "archive_sha256": "2739c80e7e2f71716ad5280deae24ca22d92c5f6584b11369781d204eaa0a8b1",
+  "git_head": "414b55b3188b45f8173f5f80468f2944a4ffe4c9",
+  "max_num_seqs_engine": 128,
+  "active_concurrency": "auto: largest multiple of 4 fitting actual KV pool at 10240 tokens",
+  "results_pending": true
+}

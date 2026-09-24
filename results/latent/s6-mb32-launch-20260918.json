@@ -1,0 +1,65 @@
+{
+  "recipe": {
+    "global_batch": 256,
+    "microbatch_per_gpu": 32,
+    "gpus_per_job": 8,
+    "backend": "fused-backward",
+    "tbptt": 32,
+    "steps": 50,
+    "lr": 1e-06,
+    "rollout_kv_gib": 12,
+    "initial_checkpoint": "stage1/student-600.pt"
+  },
+  "patch_sha256": "45ed04b693c3b71e0967f306368189f9dc6e1e4b19b5c441f7a7d1b389cf5582",
+  "files": [
+    "ouro_depth/latent/batched_engine.py",
+    "ouro_depth/latent/batched_decode.py",
+    "ouro_depth/latent/decode_training.py",
+    "ouro_depth/latent/train_decode.py",
+    "ouro_depth/latent/serving_replay.py",
+    "ouro_depth/latent/fused_history.py",
+    "ouro_depth/latent/history_kernels.py",
+    "ouro_depth/latent/vllm_rollout.py",
+    "ouro_depth/latent/qualify_vllm_rollout.py",
+    "ouro_depth/latent/verl_opd.py",
+    "ouro_depth/latent/generate.py",
+    "ouro_depth/vllm_latent/rollout_worker.py",
+    "ouro_depth/vllm_latent/generation_entry.py",
+    "ouro_depth/vllm_latent/matheval.py"
+  ],
+  "capacity_job": "2100858191423217664",
+  "jobs": {
+    "stage3": {
+      "id": "2100816416088264704",
+      "status": "preparing",
+      "run_attempt": 1,
+      "idempotency_key": "0281cde9-f7f4-426e-bc52-6df3a69851b6",
+      "verified_ready": {
+        "world": 8,
+        "global_batch": 256,
+        "microbatch": 32,
+        "backend": "fused-backward",
+        "completed_steps": 0
+      }
+    },
+    "opd": {
+      "id": "2100816458844999680",
+      "status": "preparing",
+      "run_attempt": 8,
+      "idempotency_key": "37ef5b1c-6672-405b-9b1c-2072ae07e6b0"
+    }
+  },
+  "capacity_result": {
+    "stage3": {
+      "peak_gib": 69.16967535018921,
+      "reserve_gib": 10,
+      "grad_norm": 0.09808101505041122
+    },
+    "opd": {
+      "peak_gib": 40.367955684661865,
+      "reserve_gib": 26,
+      "grad_norm": 0.12444918602705002
+    },
+    "scope": "32 sequences; prompt1024 response2048 target allocation; one TBPTT32 backward, not a full update"
+  }
+}

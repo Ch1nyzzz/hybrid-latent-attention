@@ -1,0 +1,13 @@
+{
+  "job_id": "2100846145247907840",
+  "attempt": 2,
+  "tokens": 256,
+  "examples": 4,
+  "response_tokens_each": 64,
+  "reports": [
+    {"backend":"serving","microbatch":1,"objective":0.033934327540919185,"grad_norm":1.1200177669525146,"total_seconds":277.6760586677119,"teacher_seconds":0.7698963023722172,"replay_seconds":276.81793561577797,"peak_gib":10.846391201019287,"prefill_seconds":0.47641616221517324,"forward_loss_seconds":93.32177895586938,"backward_recompute_seconds":182.00530515890568},
+    {"backend":"fused-backward","microbatch":1,"objective":0.033934327540919185,"grad_norm":1.120103359222412,"total_seconds":265.3456952823326,"teacher_seconds":0.5196369728073478,"replay_seconds":264.7868768852204,"peak_gib":10.846391201019287,"prefill_seconds":0.42520328611135483,"forward_loss_seconds":89.58858360257,"backward_recompute_seconds":173.77309007104486,"gradient":{"relative_l2":0.01140123923174578,"cosine":0.9999350058216915}}
+  ],
+  "cross_batch_diagnostic": {"candidate":"fused-backward microbatch2","reference":"serving microbatch1","relative_l2":0.07282504835418359,"cosine":0.9973486410316498,"passed":false,"next_check":"Match reference microbatch to separate kernel error from batch-shape effects"},
+  "rejected_full_fusion": {"attempt":1,"relative_l2":0.07821363877204397,"cosine":0.9969860743357275,"passed":false}
+}
