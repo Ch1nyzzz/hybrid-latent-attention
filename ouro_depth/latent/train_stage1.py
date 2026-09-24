@@ -1,18 +1,16 @@
-"""S6 stage-one attention distillation; exact diagonal, terminal latent history."""
-import os
+"""S6 stage-one attention distillation; exact diagonal (or exact-window band), terminal latent history."""
 import torch
 from torch.nn import functional as F
 
 
-def layer_losses(sl, teacher, layer, *, backward=False, weight=1.0, output_weight=1.0):
+def layer_losses(sl, teacher, layer, *, backward=False, weight=1.0, output_weight=1.0, window=0):
     h = teacher.h_in[layer]
     cos, sin = teacher.pos
     regs = sl.write(h)
     packed = sl.pack(regs[-1], sl.write1(h[0]), cos, sin)
     n = h[0].shape[1]
-    # Exact keys: the diagonal (C=1 decode) or, with S6_EXACT_WINDOW=W, the causal band 0 <= i - j <= W that the
+    # Exact keys: the diagonal (C=1 decode) or, with window=W, the causal band 0 <= i - j <= W that the
     # exact-window server reads exactly; the latent is supervised only beyond it.
-    window = int(os.environ.get('S6_EXACT_WINDOW', '0') or 0)
     offset = torch.arange(n, device=h[0].device)[:, None] - torch.arange(n, device=h[0].device)[None]
     diagonal = ((offset >= 0) & (offset <= window))[None, None]
     bias = teacher.causal_bias(n, h[0].device)

@@ -70,6 +70,8 @@ def run(train_root=None,root=None,out=None):
     geometry=['--rank',os.environ['S6_RANK_K'],'--rank-v',os.environ['S6_RANK_V'],'--rank1',rank1]
     total_steps=os.environ.get('S6_TOTAL_STEPS','600')
     common=geometry+['--data-dir','/work/expanded-corpus','--steps',total_steps]
+    if int(os.environ.get('S6_EXACT_WINDOW','0') or 0):  # train the band the exact-window server reads
+        common+=['--exact-window',os.environ['S6_EXACT_WINDOW']]
     if os.environ.get('S6_EXTERNAL_EVAL')=='1':  # in the metadata from step 2 on, so every resume matches
         common+=['--save-every',str(every())]
     train_env=dict(os.environ,PYTHONPATH=str(train_root))

@@ -41,6 +41,13 @@ def test_stage1_entrypoint_native_resume_is_bitwise(tmp_path):
     for n,x in a['student'].items():torch.testing.assert_close(x,b['student'][n],rtol=0,atol=0)
     for index,state in a['optimizer']['state'].items():
         for key,value in state.items():torch.testing.assert_close(value,b['optimizer']['state'][index][key],rtol=0,atol=0)
+    assert 'exact_window' not in a['metadata']
+    windowed=tmp_path/'windowed'
+    with patch.object(s1,'Teacher',side_effect=new_teacher):
+        s1.main(base+['--output-dir',str(windowed),'--exact-window','2'])
+    c=torch.load(windowed/'checkpoint-000002/training.pt',weights_only=False)
+    assert c['metadata']['exact_window']==2
+    assert any(not torch.equal(x,c['student'][n]) for n,x in a['student'].items())
 
 
 def test_recomputed_fkl_gradient_and_padding():

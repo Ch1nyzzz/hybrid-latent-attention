@@ -14,7 +14,7 @@ from .training_common import (amp, setup_runtime, broadcast_student, make_optimi
     distributed, reduce_sum, example_groups, json_logger)
 
 
-def train_update(student, teacher, records, *, global_batch, micro_batch, device):
+def train_update(student, teacher, records, *, global_batch, micro_batch, device, window=0):
     stats=torch.zeros(2,student.cfg['loops'],device=device,dtype=torch.float64)
     for rows in example_groups(records,micro_batch):
         ids=torch.tensor([r['input_ids'] for r in rows],device=device)
@@ -22,7 +22,7 @@ def train_update(student, teacher, records, *, global_batch, micro_batch, device
         weight=len(rows)/(global_batch*len(student.layers))
         with amp(device):
             for i,sl in enumerate(student.layers):
-                result=layer_losses(sl,teacher,i,backward=True,weight=weight)
+                result=layer_losses(sl,teacher,i,backward=True,weight=weight,window=window)
                 stats+=torch.stack((result['kl'],result['out'])).double()*weight
     reduce_sum(stats)
     if not torch.isfinite(stats).all():raise FloatingPointError('Nonfinite Stage1 metrics')
@@ -30,7 +30,7 @@ def train_update(student, teacher, records, *, global_batch, micro_batch, device
 
 
 @torch.no_grad()
-def evaluate(student, teacher, records, micro_batch, device):
+def evaluate(student, teacher, records, micro_batch, device, window=0):
     values=torch.zeros(len(student.layers),2,student.cfg['loops'],device=device,dtype=torch.float64)
     count=torch.tensor(float(len(records)),device=device)
     for rows in example_groups(records,micro_batch):
@@ -38,7 +38,7 @@ def evaluate(student, teacher, records, micro_batch, device):
         teacher.run(ids)
         with amp(device):
             for i,sl in enumerate(student.layers):
-                r=layer_losses(sl,teacher,i)
+                r=layer_losses(sl,teacher,i,window=window)
                 values[i]+=torch.stack((r['kl'],r['out'])).double()*len(rows)
     reduce_sum(values);reduce_sum(count)
     if count<=0 or not torch.isfinite(values).all():raise ValueError('Invalid validation set/metrics')
@@ -56,7 +56,7 @@ def parse(argv=None):
     for name,default in [('steps',600),('global-batch-size',128),('micro-batch-size',4),('loops',4),
                          ('rank',512),('rank-v',512),('rank1',256),('warmup',50),('init-blocks',128),
                          ('eval-records',16),('eval-every',100),('save-every',100),('seed',20260915),
-                         ('stop-after',0),('min-length',64),('calibration-length',2048)]:
+                         ('stop-after',0),('min-length',64),('calibration-length',2048),('exact-window',0)]:
         p.add_argument('--'+name,type=int,default=default)
     p.add_argument('--lr',type=float,default=1e-3)
     p.add_argument('--resume',default='')
@@ -68,6 +68,7 @@ def main(argv=None):
     args=parse(argv)
     qualify=os.environ.get("S6_QUALIFY")=="1"
     from .qualification import snapshot, check_update, verify_ranks
+    if args.exact_window<0:raise ValueError('Exact window must be nonnegative')
     if min(args.steps,args.global_batch_size,args.micro_batch_size,args.init_blocks,args.eval_records,
            args.eval_every,args.save_every,args.min_length,args.calibration_length)<1:
         raise ValueError('Positive budgets and lengths required')
@@ -76,6 +77,7 @@ def main(argv=None):
     output,data=Path(args.output_dir),Path(args.data_dir)
     emit,log=json_logger(output,rank)
     metadata={k:v for k,v in vars(args).items() if k not in ('resume','stop_after','smoke','output_dir','data_dir')}
+    if not args.exact_window:metadata.pop('exact_window')  # W=0 metadata stays identical to window-free runs
     metadata.update(stage=1,world=world,sampling='s6-source-epochs-v1',
                     data_manifest_sha256=hashlib.sha256((data/'manifest.json').read_bytes()).hexdigest())
     teacher=Teacher(args.model_path,args.loops,device,dtype=torch.bfloat16 if device.type=='cuda' else torch.float32)
@@ -98,7 +100,7 @@ def main(argv=None):
     validation=[dev.sample_at(i,seed=20260915,stage='evaluation',min_length=args.min_length)
                 for i in range(rank,args.eval_records,world)]
     def validate(step):
-        result=evaluate(student,teacher,validation,args.micro_batch_size,device)
+        result=evaluate(student,teacher,validation,args.micro_batch_size,device,window=args.exact_window)
         emit('validation',completed_steps=step,**result)
         if rank==0:(output/f'eval-{step}.json').write_text(json.dumps(result,indent=2))
     validate(completed)
@@ -111,7 +113,7 @@ def main(argv=None):
         optimizer.zero_grad(set_to_none=True)
         lr=args.lr*learning_rate_factor(step,args.steps,args.warmup)
         for g in optimizer.param_groups:g['lr']=lr
-        metrics,norm=train_update(student,teacher,rows,global_batch=args.global_batch_size,micro_batch=args.micro_batch_size,device=device)
+        metrics,norm=train_update(student,teacher,rows,global_batch=args.global_batch_size,micro_batch=args.micro_batch_size,device=device,window=args.exact_window)
         writer_norm=student.layers[0].cand_s[0].weight.grad.norm().item()
         before=student.layers[0].cand_s[0].weight.detach().clone()
         qualification_before=snapshot(student) if qualify else None

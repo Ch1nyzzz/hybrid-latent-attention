@@ -45,8 +45,9 @@ def parse(argv=None):
     p.add_argument('--khop-history-chunk', type=int, default=1024)
     p.add_argument('--warmup-steps', type=int, default=0, help='Linear LR warmup over the first N updates (all groups)')
     p.add_argument('--khop-history-max-elements', type=int, default=1 << 27)
-    p.add_argument('--exact-window', type=int, default=0,
-                   help='serve/replay with the last W history rows exact (vLLM latent_window)')
+    p.add_argument('--exact-window', type=int, default=None,
+                   help='serve/replay with the last W history rows exact (vLLM latent_window); '
+                        'default: the W recorded by the Stage1/OPD checkpoint (0 if absent)')
     p.add_argument('--replay-dtype', choices=('bfloat16','float32'), default='bfloat16')
     p.add_argument('--max-replay-mean-error', type=float, default=0.)
     p.add_argument('--max-replay-outside-fraction', type=float, default=0.)
@@ -64,7 +65,7 @@ def parse(argv=None):
         p.error('Replay tolerance must be finite and nonnegative')
     if not 0 <= args.max_replay_mean_error < float('inf') or not 0 <= args.max_replay_outside_fraction <= 1:
         p.error('Invalid aggregate replay drift budget')
-    if args.khop_hops < 0 or args.exact_window < 0:
+    if args.khop_hops < 0 or (args.exact_window or 0) < 0:
         p.error('K-hop hop count and exact window must be nonnegative')
     return args
 
@@ -102,8 +103,6 @@ def main(argv=None):
     args = parse(argv)
     from .serving_replay import set_history_backend
     set_history_backend(args.khop_history_backend, args.khop_history_chunk, args.khop_history_max_elements)
-    from .serving_replay import set_exact_window
-    set_exact_window(args.exact_window)
     rank, world, device = setup_runtime(args.seed)
     if args.global_batch_size % world:
         raise ValueError('Global batch must divide world size')
@@ -121,6 +120,10 @@ def main(argv=None):
         source = Path(args.resume or args.stage1_student)
         student, payload = load_export(source/'training.pt' if source.is_dir() else source, device)
         manifest = hashlib.sha256((data/'manifest.json').read_bytes()).hexdigest()
+        if args.exact_window is None:  # replay/serve the band the checkpoint was trained with
+            args.exact_window = int(payload.get('metadata', {}).get('exact_window', 0))
+        from .serving_replay import set_exact_window
+        set_exact_window(args.exact_window)
         if not args.resume:
             initial_stage1(payload, manifest, args.expected_stage1_manifest)
         elif payload.get('metadata', {}).get('recipe') != 's6-opd-v2':
