@@ -27,3 +27,6 @@ __pycache__/
 
 # committed result summaries may be jsonl
 !/results/**/*.jsonl
+
+# per-step training logs pulled from trisol stay local (hla/trisol/pull_curves.py)
+/results/latent/training-curves/

@@ -326,6 +326,10 @@ own-loop 窗口 16 时只有 0.4%（`shared_decode_cache.py`、`vllm_kvshare/`�
 - 环境：训练/teacher/replay 用 Transformers 4.56.2；serving 用 vLLM 0.26（独立子进程，清除 HF 依赖覆盖）。
   RKL 需要 `pip install --no-deps -r hla/requirements-opd-verl.txt`（pinned revision，代码拒绝未知 revision）。
   不要用 CPU 测试环境的 torch pin 覆盖 GPU 镜像。
+- 训练曲线：不用 wandb（trisol 节点经代理访问不了外网）。`python -m hla.trisol.pull_curves <job>...` 或 `--since YYYY-MM-DD`
+  把曲线存到本地 `results/latent/training-curves/<job>/`（不进 git）。作业有输出模型时下载 `rank-*.jsonl`/`eval-*.json`，
+  没有输出模型的作业（被取消的都没有）则从 stdout 日志重建 rank-0 的事件流。**被取消作业的日志会过期**
+  （0919–0920 的作业已查不到），作业结束后应尽快拉取。
 - 本地 CPU 测试：`python -m pytest hla/tests -n 8`。2026-09-24 结果为 238 passed / 11 failed / 53 skipped，
   失败均为本机缺 pinned verl，以及 `test_s6_replay_memory`/`test_s6_batched_decode` 的既有失败。
 
