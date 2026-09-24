@@ -93,14 +93,25 @@ def from_logs(job, out):
     return dict(source='job-stdout', events=len(rows), updates=sum(r['event'] == 'update' for r in rows))
 
 
-def pull(job_id, root):
-    job = json.loads(trisol('train', 'get', job_id, '-o', 'json').stdout)
+TERMINAL = ('succeeded', 'failed', 'canceled')
+
+
+def pull(job_id, root, refresh=False):
     out = root / job_id
+    done = out / 'source.json'
+    if not refresh and done.exists():
+        old = json.loads(done.read_text())
+        if old['status'] in TERMINAL and old['source'] not in ('none', 'error'):
+            return  # a terminal job's curves never change
+    job = json.loads(trisol('train', 'get', job_id, '-o', 'json').stdout)
     out.mkdir(parents=True, exist_ok=True)
-    meta = from_model(job, out) or from_logs(job, out) or dict(source='none')
+    try:
+        meta = from_model(job, out) or from_logs(job, out) or dict(source='none')
+    except RuntimeError as error:  # e.g. a job that never got a pod; keep going
+        meta = dict(source='error', error=str(error)[-300:])
     meta.update(job=job_id, name=job['name'], status=job['status'], created_at=job['created_at'],
                 pulled_at=datetime.now().astimezone().isoformat(timespec='seconds'))
-    (out / 'source.json').write_text(json.dumps(meta, indent=1))
+    done.write_text(json.dumps(meta, indent=1))
     print(json.dumps(meta), flush=True)
 
 
@@ -109,6 +120,7 @@ def main():
     p.add_argument('jobs', nargs='*')
     p.add_argument('--since', help='also pull every job created on/after this date (YYYY-MM-DD)')
     p.add_argument('--search', default='loop-s6', help='job-name substring for --since')
+    p.add_argument('--refresh', action='store_true', help='re-pull terminal jobs that were already pulled')
     p.add_argument('--output', type=Path, default=Path(__file__).resolve().parents[2] / 'results/latent/training-curves')
     a = p.parse_args()
     jobs = list(a.jobs)
@@ -117,7 +129,7 @@ def main():
         items = listing if isinstance(listing, list) else listing.get('items', [])
         jobs += [j['id'] for j in items if j['created_at'] >= a.since and j['id'] not in jobs]
     for job_id in jobs:
-        pull(job_id, a.output)
+        pull(job_id, a.output, a.refresh)
 
 
 if __name__ == '__main__':
