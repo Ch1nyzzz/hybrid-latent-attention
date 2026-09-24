@@ -6,7 +6,7 @@ from ouro_depth.tests.test_khop_replay import tiny_double, teacher_pass
 from ouro_depth.latent.decode_training import Trajectory
 from ouro_depth.latent.history_snapshot import collect_snapshot
 from ouro_depth.latent.khop_replay import replay_batch_khop
-from ouro_depth.latent.batched_recipe import memory_bounded_fkl
+from ouro_depth.latent.fkl import memory_bounded_fkl
 from ouro_depth.trisol.run_decode_math_intervals import training_args
 from ouro_depth.latent.train_decode import parse
 
@@ -41,20 +41,18 @@ def test_fkl_rollout_cache_matches_collect_and_checks_drift(response):
     if response>1:assert any(g is not None and g.norm()>0 for g in grads)
 
 def test_interval_fkl_cli():
-    argv=training_args('opd','m','d','out','s',10)
+    argv=training_args('m','d','out','s',10)
     args=parse(argv[argv.index('ouro_depth.latent.train_decode')+1:])
-    assert args.opd_divergence=='fkl' and args.khop_hops==3 and args.stage3_aux_weight==0
-    assert args.global_batch_size==128 and args.steps==200 and args.khop_history_source=='rollout'
+    assert args.opd_divergence=='fkl' and args.khop_hops==3
+    assert args.global_batch_size==128 and args.steps==200
 
 def test_fkl_trainer_resume(tmp_path):
     from ouro_depth.tests.test_s6_direct_decode import make_inputs, reference_worker
     from ouro_depth.latent import train_decode as trainer
     model,_,data,stage1=make_inputs(tmp_path)
-    common=['--mode','opd','--opd-divergence','fkl','--model-path','tiny','--data-dir',str(data),
+    common=['--opd-divergence','fkl','--model-path','tiny','--data-dir',str(data),
         '--steps','2','--global-batch-size','2','--max-prompt-length','8','--max-response-length','5',
-        '--save-every','1','--eval-every','2','--eval-records','2','--replay-strategy','khop',
-        '--khop-hops','3','--replay-backend','serving','--stage3-aux-weight','0',
-        '--validation-backend','external-math500']
+        '--save-every','1','--khop-hops','3']
     full,split=tmp_path/'full',tmp_path/'split'
     with patch('ouro_depth.latent.teacher.load_teacher',side_effect=lambda *a,**k:deepcopy(model)), \
          patch('ouro_depth.latent.vllm_rollout.VLLMRollout',reference_worker(model)):

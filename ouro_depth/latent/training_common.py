@@ -37,20 +37,6 @@ def make_full_parameter_optimizer(backbone, student, *, backbone_lr=1e-6,
         betas=(.9, .999))
 
 
-def optimizer_step_with_deltas(optimizer):
-    # CPU snapshots avoid a full FP32 model copy in GPU VRAM. The host-copy
-    # time/memory is included in update timing and must be benchmarked.
-    before = [[p.detach().to('cpu', copy=True) for p in g['params']]
-              for g in optimizer.param_groups]
-    optimizer.step()
-    result = {}
-    for index, (group, old) in enumerate(zip(optimizer.param_groups, before)):
-        squares = sum(float((p.detach().cpu().double() - x.double()).square().sum())
-                      for p, x in zip(group['params'], old))
-        result[group.get('role', str(index))] = math.sqrt(squares)
-    return result
-
-
 def amp(device, dtype=torch.bfloat16):
     if device.type != "cuda" or dtype in (None, torch.float32):
         return nullcontext()
@@ -70,7 +56,7 @@ def learning_rate_factor(step, total_steps, warmup):
     fraction = min(1.0, (step - warmup) / max(1, total_steps - warmup))
     return 0.1 + 0.45 * (1 + math.cos(math.pi * fraction))
 
-def synchronize_gradients(*modules, return_metrics=False):
+def synchronize_gradients(*modules):
     """SUM gradients already normalized by global token counts.
 
     Globally inactive parameters stay grad=None: AdamW must not decay an
@@ -90,13 +76,7 @@ def synchronize_gradients(*modules, return_metrics=False):
             if parameter.grad is None:
                 parameter.grad = torch.zeros_like(parameter)
             dist.all_reduce(parameter.grad, op=dist.ReduceOp.SUM)
-    group_norms = [math.sqrt(sum(float(p.grad.detach().double().square().sum())
-                                for p in trainable_parameters(m) if p.grad is not None))
-                   for m in modules] if return_metrics else None
     norm = torch.nn.utils.clip_grad_norm_(params, 1.0, error_if_nonfinite=True)
-    if return_metrics:
-        return dict(grad_norm=norm.item(), group_grad_norms=group_norms,
-                    clip_coefficient=min(1., 1. / (norm.item() + 1e-6)))
     return norm.item()
 
 def rng_state():
@@ -165,7 +145,7 @@ class TeacherTargets:
 def make_optimizer(student, lr_reader=1e-4, lr_writer=5e-5):
     readers, writers = [], []
     for name, parameter in student.named_parameters():
-        (writers if '.cand_s.' in name or '.cand1.' in name or '.inter_s.' in name else readers).append(parameter)
+        (writers if '.cand_s.' in name or '.cand1.' in name else readers).append(parameter)
     return torch.optim.AdamW([dict(params=readers, lr=lr_reader, role='reader'),
                               dict(params=writers, lr=lr_writer, role='writer')],
                              betas=(.9,.95), weight_decay=.01)
@@ -251,16 +231,9 @@ def load_export(path, device='cpu', *, allow_full_parameter=False):
     return LatentStudent.from_checkpoint(payload, device), payload
 
 
-def example_groups(records, micro_batch, *, group_by='legacy'):
+def example_groups(records, micro_batch):
     """Equal length AND prompt boundaries keep chunk policy independent of batching."""
     from collections import defaultdict
-    if group_by == 'length':
-        ordered = sorted(records, key=lambda row: (len(row['input_ids']), row['record_id']))
-        for start in range(0, len(ordered), micro_batch):
-            yield ordered[start:start+micro_batch]
-        return
-    if group_by != 'legacy':
-        raise ValueError('Unknown example grouping policy')
     groups=defaultdict(list)
     for row in records:groups[(len(row['input_ids']),row.get('prompt_len',0))].append(row)
     for group in groups.values():

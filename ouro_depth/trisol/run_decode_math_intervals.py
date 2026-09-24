@@ -16,32 +16,20 @@ import subprocess
 import sys
 import time
 
-from ouro_depth.latent.training_common import FULL_PARAMETER_SEMANTICS
-
 FDO = '{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY"}'
 
 
-def training_args(mode, model, data, output, stage1, target, resume=None, train_backbone=False, divergence="fkl", lr=3e-5, backbone_lr=1e-6, expected_stage1_manifest=None, history_backend='dense', warmup_steps=0):
+def training_args(model, data, output, stage1, target, resume=None, divergence="fkl", lr=3e-5,
+                  expected_stage1_manifest=None, history_backend='dense', warmup_steps=0):
     args=[sys.executable,'-m','torch.distributed.run','--standalone','--nproc-per-node=8',
-        '-m','ouro_depth.latent.train_decode','--mode',mode,'--model-path',model,
+        '-m','ouro_depth.latent.train_decode','--model-path',model,
         '--data-dir',data,'--output-dir',str(output),'--steps','200','--stop-after',str(target),
-        '--global-batch-size','128','--lr',str(lr),'--save-every','10','--eval-every','10',
-        '--validation-backend','external-math500','--replay-backend','serving',
+        '--global-batch-size','128','--lr',str(lr),'--save-every','10',
         '--replay-dtype','bfloat16','--max-prompt-length','1024',
-        '--max-response-length',os.environ.get('S6_OPD_MAX_RESPONSE','2048')]
-    if mode=='stage3':
-        args+=['--replay-strategy','parallel-iter','--parallel-rounds','2',
-               '--replay-microbatch-size','8','--parallel-max-batch-tokens','16384']
-    else:
-        args+=['--replay-strategy','khop','--khop-hops','3','--khop-history-source','rollout',
-               '--replay-microbatch-size','1','--rollout-kv-gib',os.environ.get('S6_ROLLOUT_KV_GIB','6'),
-               '--opd-divergence',divergence,'--stage3-aux-weight','0',
-               '--max-replay-logp-error','0','--max-replay-mean-error','.03',
-               '--max-replay-outside-fraction','.01','--khop-history-backend',history_backend]
-    if train_backbone:
-        if mode != 'opd':
-            raise ValueError('Full-parameter intervals require OPD')
-        args += ['--train-backbone', '--backbone-lr', str(backbone_lr)]
+        '--max-response-length',os.environ.get('S6_OPD_MAX_RESPONSE','2048'),
+        '--khop-hops','3','--rollout-kv-gib',os.environ.get('S6_ROLLOUT_KV_GIB','6'),
+        '--opd-divergence',divergence,'--max-replay-logp-error','0','--max-replay-mean-error','.03',
+        '--max-replay-outside-fraction','.01','--khop-history-backend',history_backend]
     if expected_stage1_manifest:
         args += ['--expected-stage1-manifest', expected_stage1_manifest]
     if warmup_steps:
@@ -169,12 +157,9 @@ def evaluate(root, model, student, data, output, *, smoke=False):
 
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument('--mode',choices=['stage3','opd'],required=True)
-    p.add_argument('--train-backbone', action='store_true')
     p.add_argument('--expected-stage1-manifest', default=None)
     p.add_argument('--opd-divergence', choices=['rkl','fkl'], default='fkl')
     p.add_argument('--lr', type=float, default=3e-5)
-    p.add_argument('--backbone-lr', type=float, default=1e-6)
     p.add_argument('--khop-history-backend', default='dense', choices=['dense','gemm-fp32','gemm-tf32','gemm-bf16'])
     p.add_argument('--warmup-steps', type=int, default=0)
     p.add_argument('--resume-checkpoint',default=os.environ.get('S6_RESUME_CHECKPOINT'))
@@ -193,25 +178,20 @@ def main():
     # S6_EXTERNAL_EVAL=1: train 0..200 in one process (checkpoint every 10), MATH500 runs in separate eval jobs.
     external=os.environ.get('S6_EXTERNAL_EVAL')=='1'
     for target in ([200] if external else range(completed+10,201,10)):
-        print('TRAIN_INTERVAL '+json.dumps(dict(mode=a.mode,start=completed if external else target-10,end=target,global_batch=128)),flush=True)
-        # Divergence and latent LR are explicit in both modes (latent-only must not fall back to defaults).
-        kwargs = dict(divergence=a.opd_divergence, lr=a.lr)
-        if a.train_backbone:
-            kwargs.update(train_backbone=True, backbone_lr=a.backbone_lr)
+        print('TRAIN_INTERVAL '+json.dumps(dict(mode='opd',start=completed if external else target-10,end=target,global_batch=128)),flush=True)
+        kwargs = dict(divergence=a.opd_divergence, lr=a.lr)  # explicit: never fall back to trainer defaults
         if a.expected_stage1_manifest:
             kwargs['expected_stage1_manifest'] = a.expected_stage1_manifest
         kwargs['history_backend'] = a.khop_history_backend
         kwargs['warmup_steps'] = a.warmup_steps
-        subprocess.run(training_args(a.mode,a.model,a.data,train,a.student,target,resume,**kwargs),check=True)
+        subprocess.run(training_args(a.model,a.data,train,a.student,target,resume,**kwargs),check=True)
         checkpoint=train/f'checkpoint-{target:06d}'
         marker=json.loads((checkpoint/'complete.json').read_text())
         if marker['completed_steps']!=target or not (checkpoint/'training.pt').is_file():
             raise RuntimeError('Incomplete training checkpoint')
-        # Full-parameter runs export one backbone+latent package under a distinct name.
-        name='opd_student' if marker.get('semantics')==FULL_PARAMETER_SEMANTICS else 'student'
         if not external:
-            evaluate(root,a.model,str(train/f'{name}-{target}.pt'),a.math_data,out/f'math500/step-{target:06d}')
+            evaluate(root,a.model,str(train/f'student-{target}.pt'),a.math_data,out/f'math500/step-{target:06d}')
         resume=checkpoint
-    print('TRAIN_MATH200_COMPLETE '+a.mode,flush=True)
+    print('TRAIN_MATH200_COMPLETE opd',flush=True)
 
 if __name__=='__main__':main()

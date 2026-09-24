@@ -15,7 +15,7 @@ import torch
 from torch.nn import functional as F
 
 from .batched_engine import BatchedRollingEngine
-from .batched_recipe import memory_bounded_fkl
+from .fkl import memory_bounded_fkl
 
 
 class PromptIndex:

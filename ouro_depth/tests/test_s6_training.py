@@ -4,15 +4,12 @@ import json
 from unittest.mock import patch
 import pytest
 import torch
-from ouro_depth.tests.test_s6_engine import fixture, targets_fn
-from ouro_depth.latent import train_stage1_recipe as s1, train_recipe as s23
-from ouro_depth.latent.training_common import (make_optimizer, atomic_checkpoint, restore_checkpoint,
-    TeacherTargets, synchronize_gradients, SEMANTICS)
-from ouro_depth.latent.batched_recipe import prepare_batch, backward_batch, masked_fkl, memory_bounded_fkl
+from ouro_depth.tests.test_s6_engine import fixture
+from ouro_depth.latent import train_stage1_recipe as s1
+from ouro_depth.latent.fkl import masked_fkl, memory_bounded_fkl
 from ouro_depth.latent.batched_engine import BatchedRollingEngine
 from ouro_depth.latent.corpus_index import RecordIndex
 from ouro_depth.latent.generate import LatentDecoder
-from ouro_depth.latent.evaluate_recipe import evaluate
 
 
 def make_data(path,ids):
@@ -25,73 +22,25 @@ def make_data(path,ids):
     (path/'manifest.json').write_text('{"test":true}')
 
 
-@pytest.mark.parametrize('batching', ['legacy', 'length'])
-def test_entrypoints_stage_handoff_and_native_resume(tmp_path, batching):
-    model,_,teacher,ids=fixture()
+def test_stage1_entrypoint_native_resume_is_bitwise(tmp_path):
+    model,_,_,ids=fixture()
     data=tmp_path/'data';make_data(data,ids)
-    if batching == 'length':
-        path=data/'train.jsonl'
-        rows=[json.loads(line) for line in path.read_text().splitlines()]
-        rows[0]['input_ids']=rows[0]['input_ids'][:7]
-        rows[1]['prompt_len']=4
-        path.write_text(''.join(json.dumps(row)+'\n' for row in rows))
     def new_teacher(*a,**kw):
         from ouro_depth.latent.teacher import Teacher
         return Teacher.wrap(deepcopy(model))
-    stage1=tmp_path/'stage1'
     base=['--model-path','tiny','--data-dir',str(data),'--global-batch-size','2','--micro-batch-size','2',
-          '--eval-records','2','--min-length','4']
-    with patch.object(s1,'Teacher',side_effect=new_teacher):
-        s1.main(base+['--output-dir',str(stage1),'--steps','2','--rank','8','--rank-v','8','--rank1','8',
-                     '--init-blocks','2','--calibration-length','8','--eval-every','2','--save-every','1','--stop-after','1'])
-        s1.main(base+['--output-dir',str(stage1),'--steps','2','--rank','8','--rank-v','8','--rank1','8',
-                     '--init-blocks','2','--calibration-length','8','--eval-every','2','--save-every','1',
-                     '--resume',str(stage1/'checkpoint-000001')])
-    args=base+['--steps','1,1','--stage1-student',str(stage1/'student-2.pt'),
-               '--stage2-batching',batching,
-               '--prefill-chunk-sizes','3','--prefill-horizon-tokens','3','--prompt-chunk-size','3',
-               '--tbptt','2','--save-every','1','--eval-every','2']
+          '--eval-records','2','--min-length','4','--steps','2','--rank','8','--rank-v','8','--rank1','8',
+          '--init-blocks','2','--calibration-length','8','--eval-every','2','--save-every','1']
     complete=tmp_path/'complete';resumed=tmp_path/'resumed'
-    with patch.object(s23,'Teacher',side_effect=new_teacher):
-        s23.main(args+['--output-dir',str(complete)])
-        s23.main(args+['--output-dir',str(resumed),'--stop-after','1'])
-        s23.main(args+['--output-dir',str(resumed),'--resume',str(resumed/'checkpoint-000001')])
+    with patch.object(s1,'Teacher',side_effect=new_teacher):
+        s1.main(base+['--output-dir',str(complete)])
+        s1.main(base+['--output-dir',str(resumed),'--stop-after','1'])
+        s1.main(base+['--output-dir',str(resumed),'--resume',str(resumed/'checkpoint-000001')])
     a=torch.load(complete/'checkpoint-000002/training.pt',weights_only=False)
     b=torch.load(resumed/'checkpoint-000002/training.pt',weights_only=False)
-    assert 'eval_prefill_chunk_sizes' not in a['metadata']
-    if batching == 'legacy':assert 'stage2_batching' not in a['metadata']
-    else:assert a['metadata']['stage2_batching']=='length'
     for n,x in a['student'].items():torch.testing.assert_close(x,b['student'][n],rtol=0,atol=0)
     for index,state in a['optimizer']['state'].items():
         for key,value in state.items():torch.testing.assert_close(value,b['optimizer']['state'][index][key],rtol=0,atol=0)
-    records=[json.loads(x) for x in (resumed/'rank-0.jsonl').read_text().splitlines()]
-    assert [r['stage'] for r in records if r['event']=='update']==[2,3]
-    assert all(r['writer_update'][n]>0 for r in records if r['event']=='update' for n in r['writer_update'])
-
-
-def test_length_groups_reproduce_measured_profile_batches():
-    from ouro_depth.latent.training_common import example_groups
-    from ouro_depth.latent.profile_stage2 import groups_for
-    rows=[dict(record_id=str(i),input_ids=list(range(7+i%4)),prompt_len=1+i%3) for i in range(16)]
-    for size in (2,4,8,16):
-        actual=list(example_groups(rows,size,group_by='length'))
-        assert actual==groups_for(rows,size)
-        assert sorted(r['record_id'] for batch in actual for r in batch)==sorted(r['record_id'] for r in rows)
-    assert list(example_groups(rows,4))==groups_for(rows,4,legacy=True)
-
-
-def test_microbatch_gradient_sum_matches_batched_variable_lengths():
-    model,student,teacher,ids=fixture();original=deepcopy(student.state_dict())
-    examples=[(ids[:1],3),(ids[1:,:7],3)]
-    refs=[]
-    # C=1 is padding-invariant; production groups equal request boundaries for C>1.
-    for groups in ([examples],[[examples[0]],[examples[1]]]):
-        student.load_state_dict(original);student.zero_grad(set_to_none=True)
-        for group in groups:
-            batch=prepare_batch(group,targets_fn(teacher),2)
-            backward_batch(model,student,batch,stage=2,normalizer=15,chunk_size=1,horizon_tokens=2)
-        refs.append({n:p.grad.clone() for n,p in student.named_parameters()})
-    for n,g in refs[0].items():torch.testing.assert_close(g,refs[1][n],rtol=2e-4,atol=3e-6,msg=n)
 
 
 def test_recomputed_fkl_gradient_and_padding():
@@ -117,7 +66,7 @@ def test_sampling_filters_short_continuations_and_resume(tmp_path):
     first.close();second.close()
 
 
-def test_generation_and_evaluation_share_engine():
+def test_generation_shares_engine():
     model,student,teacher,ids=fixture();prompt=ids[:1,:3]
     dec=LatentDecoder(model,student,32,prompt_chunk_size=2)
     generated=dec.generate([prompt],3,set())[0]
@@ -128,17 +77,9 @@ def test_generation_and_evaluation_share_engine():
             token=pred[:,-1].argmax(-1)[:,None];reference.append(int(token))
             pred,_=engine.step(token)
     assert generated==reference
-    metrics=evaluate(model,student,targets_fn(teacher),[(ids[:1],3)],prompt_chunk_size=2)
-    assert metrics['prefill_count']==2 and metrics['decode_count']==7
 
 
 def test_invalid_s6_options_rejected():
-    base=['--model-path','m','--data-dir','d','--output-dir','o','--stage1-student','s']
-    with pytest.raises(SystemExit):s23.parse(base+['--stage3-precompute-loop1'])
-    with pytest.raises(SystemExit):s23.parse(base+['--stage3-parallel-windows','2'])
-    with pytest.raises(SystemExit):s23.parse(base+['--eval-prefill-chunk-sizes','0'])
-    separate=s23.parse(base+['--prefill-chunk-sizes','256','--eval-prefill-chunk-sizes','32,64,128,256'])
-    assert separate.prefill_chunk_sizes==(256,) and separate.eval_prefill_chunk_sizes==(32,64,128,256)
     with pytest.raises(TypeError):
         from ouro_depth.latent.register import LatentStudent
         LatentStudent(2,16,2,8,writer='register')

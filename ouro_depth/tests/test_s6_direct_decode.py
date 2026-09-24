@@ -1,4 +1,4 @@
-"""Direct Stage1 routes: tiny Ouro, real upstream verl losses, exact resume."""
+"""Stage1 -> OPD trainer: tiny Ouro, real upstream verl losses, rollout-history K-hop replay, exact resume."""
 from copy import deepcopy
 import hashlib
 import json
@@ -14,12 +14,28 @@ from ouro_depth.latent.teacher import Teacher
 
 
 def reference_worker(model):
-    # CPU trainer tests replace only the external generation boundary; the real
-    # vLLM worker is qualified separately on GPU, never a production fallback.
+    # CPU trainer tests replace only the external generation boundary (HF sampling plus a
+    # serving-numerics history export in the vLLM cache format); the real vLLM worker is
+    # qualified separately on GPU, never a production fallback.
+    from pathlib import Path
+    from ouro_depth.latent.history_snapshot import collect_snapshot
     class Worker:
-        def __init__(self, *a, max_new, **kw): self.max_new = max_new
+        def __init__(self, model_path, work, *a, max_new, **kw):
+            self.max_new, self.work = max_new, Path(work)
+            self.work.mkdir(parents=True, exist_ok=True)
         def generate(self, student, prompts, *, eos_ids, version):
-            return rollout(model, student, prompts, max_new=self.max_new, eos_ids=eos_ids, version=version)
+            trajectories = rollout(model, student, prompts, max_new=self.max_new, eos_ids=eos_ids, version=version)
+            for index, t in enumerate(trajectories):
+                snapshot = collect_snapshot(model, student, t.ids, t.prompt, serving_numerics=True)
+                path, length, request = self.work/f'history-{version}-{index}.pt', t.ids.shape[1]-1, str(index)
+                torch.save(dict(schema='s6-rollout-cache-v1', version=version, request_id=request, cfg=student.cfg,
+                                prompt_ids=t.ids[0, :t.prompt].tolist(), length=length,
+                                first_response_logits=snapshot.first_response_logits,
+                                rows=tuple(r.detach() for r in snapshot.rows)), path)
+                t.request_id = request
+                t.history_ref = dict(path=str(path), version=version, request_id=request, length=length,
+                                     token_ids=t.ids[0].tolist())
+            return trajectories
         def close(self): pass
     return Worker
 
@@ -83,7 +99,7 @@ def test_full_prompt_response_boundary_and_writer_gradient(checkpointing):
         engine.detach_history()
     preds = [first]
     for i in range(3,9):preds.append(engine.step(ids[:1,i:i+1])[0])
-    from ouro_depth.latent.batched_recipe import memory_bounded_fkl
+    from ouro_depth.latent.fkl import memory_bounded_fkl
     pred = torch.cat(preds,1)
     memory_bounded_fkl(pred,logits[:,2:],torch.ones((1,7),dtype=torch.bool)).div(7).backward()
     torch.testing.assert_close(pred.detach(),torch.cat(observed,1))
@@ -133,17 +149,14 @@ def test_verl_pg_teacher_direction_mask_and_window_normalization():
     torch.testing.assert_close(fn(current,old[:,:2],teacher[:,:2],mask[:,:2],3),expected)
 
 
-@pytest.mark.parametrize('mode', ['stage3','opd'])
-@pytest.mark.parametrize('microbatch', [1,2])
-def test_direct_entrypoint_resume_matches_uninterrupted(tmp_path,mode,microbatch):
-    if mode == 'opd':opd_loss()
+@pytest.mark.parametrize('divergence', ['fkl','rkl'])
+def test_opd_entrypoint_resume_matches_uninterrupted(tmp_path,divergence):
+    if divergence == 'rkl':opd_loss()
     model, _, data, stage1 = make_inputs(tmp_path)
     def new_teacher(*a,**kw):return deepcopy(model)
-    common = ['--mode',mode,'--model-path','tiny','--data-dir',str(data),'--steps','3',
-              '--global-batch-size','2','--tbptt','2','--max-prompt-length','8',
-              '--max-response-length','5','--save-every','1','--eval-every','3','--eval-records','2']
-    if microbatch == 2:
-        common += ['--replay-microbatch-size','2','--replay-backend','fused-backward']
+    common = ['--opd-divergence',divergence,'--model-path','tiny','--data-dir',str(data),'--steps','3',
+              '--global-batch-size','2','--max-prompt-length','8','--max-response-length','5',
+              '--save-every','1','--replay-dtype','float32']
     complete, resumed = tmp_path/'complete',tmp_path/'resumed'
     with patch('ouro_depth.latent.teacher.load_teacher',side_effect=new_teacher), \
          patch('ouro_depth.latent.vllm_rollout.VLLMRollout',reference_worker(model)):
@@ -151,18 +164,16 @@ def test_direct_entrypoint_resume_matches_uninterrupted(tmp_path,mode,microbatch
         trainer.main(common+['--stage1-student',str(stage1),'--output-dir',str(resumed),'--stop-after','1'])
         trainer.main(common+['--resume',str(resumed/'checkpoint-000001'),'--output-dir',str(resumed)])
     a,b = [torch.load(p/'checkpoint-000003/training.pt',weights_only=False) for p in (complete,resumed)]
-    assert a['metadata']==b['metadata']
+    assert a['metadata']==b['metadata'] and a['metadata']['recipe']=='s6-opd-v2'
     assert a['progress']['supervised_tokens']==b['progress']['supervised_tokens']
-    assert a['metadata']['prompt_chunk_size']==0
     for name,x in a['student'].items():torch.testing.assert_close(x,b['student'][name],rtol=0,atol=0)
     for key,state in a['optimizer']['state'].items():
         for name,x in state.items():torch.testing.assert_close(x,b['optimizer']['state'][key][name],rtol=0,atol=0)
     rows=[json.loads(line) for line in (complete/'rank-0.jsonl').read_text().splitlines()]
     updates=[r for r in rows if r['event']=='update']
     assert [r['rollout_version'] for r in updates]==[0,1,2]
-    assert all(r['stage']==(3 if mode=='stage3' else 'opd') and r['grad_norm']>0 for r in updates)
-    validation=json.loads((complete/'eval-0.json').read_text())
-    assert validation['decode_count']==10
+    assert all(r['stage']=='opd' and r['grad_norm']>0 for r in updates)
+    assert not list(complete.glob('rollout-rank-0/history-*.pt'))  # replay consumes every exported history
 
 
 def test_reject_partial_stage1_and_inconsistent_prefill(tmp_path):
@@ -177,9 +188,10 @@ def test_reject_partial_stage1_and_inconsistent_prefill(tmp_path):
                 dict(payload,metadata=dict(payload['metadata'],stage=3))):
         with pytest.raises(ValueError,match='completed Stage1'):
             trainer.initial_stage1(bad,manifest)
-    base=['--mode','stage3','--model-path','m','--data-dir',str(data),'--output-dir','o','--stage1-student',str(stage1)]
-    with pytest.raises(SystemExit):trainer.parse(base+['--prompt-chunk-size','256'])
-    assert trainer.parse(base).prompt_chunk_size == 0
+    base=['--model-path','m','--data-dir',str(data),'--output-dir','o','--stage1-student',str(stage1)]
+    for removed in (['--mode','stage3'],['--train-backbone'],['--replay-strategy','tbptt']):
+        with pytest.raises(SystemExit):trainer.parse(base+removed)
+    assert trainer.parse(base).opd_divergence == 'fkl'
 
 
 def _distributed_direct_rank(rank, rendezvous):
@@ -198,15 +210,10 @@ def _distributed_direct_rank(rank, rendezvous):
     dist.init_process_group('gloo',init_method=Path(rendezvous).as_uri(),rank=rank,world_size=2,
                             timeout=timedelta(seconds=60))
     try:
-        for mode in ('stage3','opd'):
+        for _ in range(1):
             student.zero_grad(set_to_none=True);reference.zero_grad(set_to_none=True)
             def backward(st,trajectory):
-                if mode=='opd':
-                    kw=dict(teacher_logp=score_teacher(model,trajectory),opd_loss=fn)
-                else:
-                    capture=Teacher.wrap(model)
-                    logits,targets=TeacherTargets(capture)(trajectory.ids[:,:-1]);capture.remove_hooks()
-                    kw=dict(teacher_logits=logits,targets=targets)
+                kw=dict(teacher_logp=score_teacher(model,trajectory),opd_loss=fn)
                 return replay(model,st,trajectory,window=2,normalizer=count,checkpointing=True,**kw)
             backward(student,trajectories[rank]);synchronize_gradients(student)
             for t in trajectories:backward(reference,t)
@@ -233,12 +240,12 @@ def _distributed_entrypoint_rank(rank, root):
     import torch.distributed as dist
     root=Path(root)
     model,_,teacher,_=fixture();teacher.remove_hooks()
-    for mode in ('stage3','opd'):
+    for mode in ('fkl','rkl'):
         dist.init_process_group('gloo',init_method=(root/f'init-{mode}').as_uri(),rank=rank,world_size=2,
                                 timeout=timedelta(seconds=60))
-        args=['--mode',mode,'--model-path','tiny','--data-dir',str(root/'data'),
+        args=['--opd-divergence',mode,'--model-path','tiny','--data-dir',str(root/'data'),
               '--stage1-student',str(root/'stage1.pt'),'--output-dir',str(root/mode),
-              '--steps','2','--global-batch-size','2','--eval-records','1','--tbptt','2',
+              '--steps','2','--global-batch-size','2','--replay-dtype','float32',
               '--max-prompt-length','8','--max-response-length','5']
         with patch.object(trainer,'setup_runtime',return_value=(rank,2,torch.device('cpu'))), \
              patch('ouro_depth.latent.teacher.load_teacher',side_effect=lambda *a,**k:deepcopy(model)), \
@@ -253,7 +260,7 @@ def test_direct_two_rank_entrypoints(tmp_path):
     if not dist.is_gloo_available():pytest.skip('Gloo unavailable')
     make_inputs(tmp_path)
     mp.spawn(_distributed_entrypoint_rank,args=(str(tmp_path),),nprocs=2,join=True)
-    for mode in ('stage3','opd'):
+    for mode in ('fkl','rkl'):
         state=torch.load(tmp_path/mode/'checkpoint-000002/training.pt',weights_only=False)
         assert len(state['rng_by_rank'])==2 and state['progress']['supervised_tokens']>0
         logs=[[json.loads(x) for x in (tmp_path/mode/f'rank-{r}.jsonl').read_text().splitlines()] for r in range(2)]

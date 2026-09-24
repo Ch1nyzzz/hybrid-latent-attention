@@ -79,9 +79,7 @@ class OuroLatentAttention(nn.Module):
                                           quant_config=quant_config, prefix=f'{prefix}.qkv_proj')
         self.o_proj = RowParallelLinear(hidden_size, hidden_size, bias=False, quant_config=quant_config, prefix=f'{prefix}.o_proj')
         self.rotary_emb = get_rope(self.head_dim, max_position=max_position, rope_parameters=config.rope_parameters)
-        self.latent = LatentLayer(hidden_size, num_heads, self.head_dim, loops, rank, rank_v, rank1,
-                                  gated=bool(latent_cfg['gated']), bottleneck=int(latent_cfg['bottleneck']),
-                                  legacy=bool(latent_cfg['legacy']))
+        self.latent = LatentLayer(hidden_size, num_heads, self.head_dim, loops, rank, rank_v, rank1)
         index = extract_layer_index(prefix)
         second = prefix.replace(f'layers.{index}', f'layers.{config.num_hidden_layers + index}')  # one integer per name
         scale = self.head_dim ** -0.5

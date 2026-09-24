@@ -13,7 +13,7 @@ import time
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from .batched_recipe import memory_bounded_fkl
+from .fkl import memory_bounded_fkl
 from .history_snapshot import collect_snapshot, load_rollout_snapshot
 from .register import apply_rope
 from . import serving_replay

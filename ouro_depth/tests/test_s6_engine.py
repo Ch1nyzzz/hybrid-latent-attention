@@ -1,16 +1,12 @@
 """S6 invariants on real tiny Ouro; CPU FP32, not GPU qualification."""
-from copy import deepcopy
 import torch
-import pytest
 from ouro_depth.vendor.configuration_ouro import OuroConfig
 from ouro_depth.vendor.modeling_ouro import OuroForCausalLM
 from ouro_depth.latent.teacher import Teacher
 from ouro_depth.latent.register import LatentStudent
 from ouro_depth.latent.init_teacher import teacher_init
 from ouro_depth.latent.batched_engine import BatchedRollingEngine
-from ouro_depth.latent.batched_recipe import prepare_batch, backward_batch, memory_bounded_fkl
 from ouro_depth.latent.train_stage1 import layer_losses
-from ouro_depth.latent.stage3_replay import chunk_ranges, collect_history
 
 
 def fixture(full=False):
@@ -77,29 +73,6 @@ def test_stage1_all_writers_receive_gradients():
     layer_losses(student.layers[0],teacher,0,backward=True)
     for linear in [*student.layers[0].cand_s,student.layers[0].cand1]:
         assert linear.weight.grad.norm()>0
-    for block in student.layers[0].inter_s:
-        for p in block.parameters():
-            assert p.grad is not None and p.grad.norm()>0
-
-
-@pytest.mark.parametrize('checked',[False,True])
-def test_full_horizon_replay_matches_full_graph_gradients(checked):
-    model,student,teacher,ids=fixture()
-    batch=prepare_batch([(ids[:1],3),(ids[1:],3)],targets_fn(teacher),2)
-    n=int(batch.valid.sum())
-    backward_batch(model,student,batch,stage=2,normalizer=n,chunk_size=3,horizon_tokens=100,checkpointing=checked)
-    actual={name:p.grad.clone() if p.grad is not None else None for name,p in student.named_parameters()}
-    student.zero_grad(set_to_none=True)
-    engine=BatchedRollingEngine(model,student,False)
-    loss=0
-    for a,b in chunk_ranges(batch.ids.shape[1],3):
-        targets={k:(v[:,a:b],batch.denominators[k]) for k,v in batch.targets.items()}
-        pred,aux=engine.forward_chunk(batch.ids[:,a:b],batch.valid[:,a:b],targets)
-        loss=loss+(memory_bounded_fkl(pred,batch.logits[:,a:b],batch.valid[:,a:b])+.1*aux)/n
-    loss.backward()
-    for name,p in student.named_parameters():
-        if actual[name] is None:assert p.grad is None
-        else:torch.testing.assert_close(actual[name],p.grad,rtol=2e-4,atol=2e-6,msg=name)
 
 
 def test_two_chunk_writer_path_and_detach_control():
@@ -118,46 +91,6 @@ def test_two_chunk_writer_path_and_detach_control():
             for lin in [*sl.cand_s,sl.cand1]:
                 if detach:assert lin.weight.grad is None or lin.weight.grad.count_nonzero()==0
                 else:assert lin.weight.grad.norm()>0
-
-
-def test_sliding_boundaries_outputs_and_no_duplicate_loss():
-    model,student,teacher,ids=fixture()
-    batch=prepare_batch([(ids[:1],3)],targets_fn(teacher),2)
-    reference=BatchedRollingEngine(model,student,False)
-    expected={}
-    with torch.no_grad():
-        for i,(a,b) in enumerate(chunk_ranges(9,3)):
-            expected[i]=reference.forward_chunk(batch.ids[:,a:b])[0]
-    for stride in (1,2):
-        visits=[];rows={}
-        def observe(target,index,scored,pred,e):
-            assert not any(x.requires_grad for x in e.prefix)
-            for row in e.last_written:row.retain_grad()
-            rows[target,index]=e.last_written
-            if scored:
-                visits.append(index)
-                torch.testing.assert_close(pred,expected[index],rtol=2e-5,atol=2e-7)
-        result=backward_batch(model,student,batch,stage=2,normalizer=9,chunk_size=3,horizon_tokens=3,
-                              supervised_chunks=stride,observer=observe)
-        assert sorted(visits)==[0,1,2] and result['supervised_positions']==9
-        if stride==1:
-            assert (2,0) not in rows
-            assert all(r.grad is not None and r.grad.norm()>0 for r in rows[2,1])
-
-
-def test_decode_gradients_and_forbidden_precompute():
-    model,student,teacher,ids=fixture()
-    batch=prepare_batch([(ids[:1],3)],targets_fn(teacher),3)
-    rows=[]
-    def observe(start,index,scored,pred,e):
-        if index==batch.prompt:
-            rows.extend(e.last_written)
-            for r in rows:r.retain_grad()
-    result=backward_batch(model,student,batch,stage=3,normalizer=6,window=3,prompt_chunk_size=2,observer=observe)
-    assert result['supervised_positions']==6
-    assert all(r.grad is not None and r.grad.norm()>0 for r in rows)
-    with pytest.raises(ValueError,match='loop one'):
-        backward_batch(model,student,batch,stage=3,normalizer=6,precompute_loop1=True)
 
 
 def test_left_padding_positions_and_masking():

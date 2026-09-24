@@ -1,17 +1,13 @@
-"""Full-parameter backbone sync: bidirectional slice coverage, premise asserts, RNE in-place copy."""
+"""Full-parameter (SFT) backbone loading into the vLLM adapter: bidirectional slice coverage, premise asserts, RNE in-place copy."""
 import ast
-from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace as NS
-from unittest.mock import patch
 
 import pytest
 import torch
 
 from ouro_depth.latent.training_common import FULL_PARAMETER_SEMANTICS, SEMANTICS
-from ouro_depth.tests.test_s6_engine import fixture
 from ouro_depth.vllm_latent import backbone_sync as bs
-from ouro_depth.vllm_latent.rollout_worker import install_full_parameter, install_student
 
 
 def adapter_packed_mapping():
@@ -209,58 +205,3 @@ def test_missing_final_shard_cannot_be_hidden_by_oversized_q():
     source['model.layers.0.self_attn.q_proj.weight'] = torch.randn(16, 8)
     with pytest.raises(ValueError, match='missing backbone shards'):
         bs.build_backbone_update(source, bs.sync_targets(engine()), PACKED)
-
-
-def test_bad_full_package_does_not_partially_mutate_model(tmp_path, monkeypatch):
-    _, student, teacher, _ = fixture()
-    teacher.remove_hooks()
-    cfg = NS(vocab=41, hidden=16, inter=32, layers=2, heads=2)
-    machine = Engine([deepcopy(layer) for layer in student.layers], cfg).bfloat16()
-    machine.model.latent_cfg = student.cfg
-    before = {k: v.detach().clone() for k, v in machine.state_dict().items()}
-    source = hf_state(cfg)
-    source['model.norm.weight'][0] = float('nan')
-    path = tmp_path/'invalid.pt'
-    torch.save(dict(student={k: v + 1 for k, v in student.state_dict().items()},
-        cfg=student.cfg, version=3, backbone=source, semantics=FULL_PARAMETER_SEMANTICS), path)
-    monkeypatch.setattr(bs, 'check_backbone_premises', lambda model: None)
-    with pytest.raises(ValueError, match='Nonfinite'):
-        install_full_parameter(machine, str(path), 3)
-    for key, value in machine.state_dict().items():
-        torch.testing.assert_close(value, before[key], atol=0, rtol=0)
-
-
-def test_install_full_parameter_roundtrip_and_rejections(tmp_path, monkeypatch):
-    _, student, teacher, _ = fixture()
-    teacher.remove_hooks()
-    cfg = NS(vocab=41, hidden=16, inter=32, layers=2, heads=2)
-    torch.manual_seed(7)
-    machine = Engine([deepcopy(layer) for layer in student.layers], cfg).bfloat16()
-    machine.model.latent_cfg = student.cfg
-    source = hf_state(cfg)
-    state = {k: v + 1 for k, v in student.state_dict().items()}
-    package = dict(student=state, cfg=student.cfg, version=3, backbone=source, semantics=FULL_PARAMETER_SEMANTICS)
-    path = tmp_path/'package.pt'
-    torch.save(package, path)
-    monkeypatch.setattr(bs, 'check_backbone_premises', lambda model: None)
-    gate_before = machine.model.early_exit_gate.weight.detach().clone()
-    with patch('torch.cuda.synchronize'):
-        ack = install_full_parameter(machine, str(path), 3)
-    latent_targets = sum(len(layer.self_attn.latent.state_dict()) for layer in machine.model.layers)
-    assert ack == {'version': 3, 'tensors': latent_targets + len(bs.sync_targets(machine))}
-    for i, layer in enumerate(machine.model.layers):
-        for k, v in layer.self_attn.latent.state_dict().items():
-            torch.testing.assert_close(v, state[f'layers.{i}.{k}'].bfloat16(), rtol=0, atol=0)
-    torch.testing.assert_close(machine.lm_head.weight, source['lm_head.weight'].bfloat16(), rtol=0, atol=0)
-    torch.testing.assert_close(machine.model.early_exit_gate.weight, gate_before, rtol=0, atol=0)
-    with patch('torch.cuda.synchronize'):
-        with pytest.raises(ValueError, match='update_s6_backbone'):
-            install_student(machine, str(path), 3)  # latent-only entry must not half-apply the package
-        latent_only = tmp_path/'latent.pt'
-        torch.save(dict(student=state, cfg=student.cfg, version=3), latent_only)
-        with pytest.raises(ValueError, match='full-parameter'):
-            install_full_parameter(machine, str(latent_only), 3)
-        bad = tmp_path/'bad.pt'
-        torch.save(dict(package, semantics=SEMANTICS), bad)
-        with pytest.raises(ValueError, match='mismatch'):
-            install_full_parameter(machine, str(bad), 3)

@@ -22,7 +22,7 @@ def verify(output,data,world=8,rank_k=512,rank_v=512,rank1=256,steps=600):
         qualification=[r for r in rows if r['event']=='qualification_update']
         require(len(qualification)==8, 'len(qualification)==8')
         for r in qualification:
-            expected = {'cand_s','cand1','inter_s','q_absorb','out_absorb','q_absorb1','out_absorb1'} if 'inter_s' in r['groups'] else {'cand_s','cand1','q_absorb','out_absorb','q_absorb1','out_absorb1'}
+            expected = {'cand_s','cand1','q_absorb','out_absorb','q_absorb1','out_absorb1'}
             require(set(r['groups'])==expected, f"unexpected parameter groups: {set(r['groups'])} != {expected}")
             require(all(v['min_grad']>0 and v['min_update']>0 for v in r['groups'].values()), "all(v['min_grad']>0 and v['min_update']>0 for v in r['groups'].values())")
         ready=[r for r in rows if r['event']=='ready']

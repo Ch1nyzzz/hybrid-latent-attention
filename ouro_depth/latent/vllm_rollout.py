@@ -11,7 +11,6 @@ import time
 import torch
 
 from .decode_training import Trajectory
-from .training_common import FULL_PARAMETER_SEMANTICS
 
 
 def worker_environment(root, work, device, base_env):
@@ -56,17 +55,13 @@ class VLLMRollout:
             text=True, start_new_session=True,
             env=worker_environment(root, self.work, device.index or 0, os.environ))
 
-    def generate(self, student, prompts, *, eos_ids, version, backbone=None):
+    def generate(self, student, prompts, *, eos_ids, version):
         if version <= self.last_version:
             raise ValueError('Cannot reuse an old rollout version')
         weights = self.work/'student.pt'
         temporary = self.work/'student.tmp'
         payload = dict(student={k: v.detach().cpu() for k, v in student.state_dict().items()},
                        cfg=student.cfg, version=version)
-        if backbone is not None:
-            # FP32 master on disk: the worker's copy_ into BF16 engine params applies the RNE rounding.
-            payload.update(backbone={k: v.detach().cpu() for k, v in backbone.state_dict().items()},
-                           semantics=FULL_PARAMETER_SEMANTICS)
         torch.save(payload, temporary)
         temporary.replace(weights)
         reply = self.work/f'reply-{version}.json'
@@ -74,8 +69,6 @@ class VLLMRollout:
             raise FileExistsError('Stale worker reply: '+str(reply))
         request = dict(version=version, weights=str(weights), reply=str(reply),
                        prompts=[p.detach().cpu().reshape(-1).tolist() for p in prompts], eos_ids=sorted(eos_ids))
-        if backbone is not None:
-            request['full_parameter'] = True
         if self.export_cache:
             request['cache_directory'] = str((self.work/f'history-{version}').resolve())
         self.process.stdin.write(json.dumps(request)+'\n'); self.process.stdin.flush()

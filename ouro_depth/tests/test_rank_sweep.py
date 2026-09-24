@@ -17,8 +17,8 @@ def test_rank_sweep_init_matches_teacher_init():
     blocks = np.random.randint(3, 64, (3, 32))
     covs = rank_sweep.collect(teacher, blocks, torch.device('cpu'), H, D, nL, 3)
     for rk, rv, r1 in [(16, 16, 16), (32, 48, 16), (96, 192, 64)]:
-        torch.manual_seed(1); a = LatentStudent(nL, 64, H, D, 4, rk, rv, r1, gated=False)
-        torch.manual_seed(1); b = LatentStudent(nL, 64, H, D, 4, rk, rv, r1, gated=False)
+        torch.manual_seed(1); a = LatentStudent(nL, 64, H, D, 4, rk, rv, r1)
+        torch.manual_seed(1); b = LatentStudent(nL, 64, H, D, 4, rk, rv, r1)
         teacher_init(a, teacher, blocks, torch.device('cpu'), micro_batch=1)
         rank_sweep.init_from(b, teacher, covs, torch.device('cpu'))
         for (n, x), (_, y) in zip(a.state_dict().items(), b.state_dict().items()):

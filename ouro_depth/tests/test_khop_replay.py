@@ -1,16 +1,12 @@
 """K-hop replay: FP64 VJP math, tiny-S6 recovery, accumulation, CLI and metadata gates."""
-from copy import deepcopy
-import hashlib
-import json
 import math
-from unittest.mock import patch
 
 import pytest
 import torch
 
 from ouro_depth.tests.test_s6_direct_decode import make_inputs
 from ouro_depth.latent import train_decode as trainer
-from ouro_depth.latent.batched_recipe import memory_bounded_fkl
+from ouro_depth.latent.fkl import memory_bounded_fkl
 from ouro_depth.latent.decode_training import Trajectory, replay
 from ouro_depth.latent.history_snapshot import collect_snapshot, validate_snapshot
 from ouro_depth.latent.khop_replay import khop_vjp, parallel_forward, replay_batch_khop
@@ -159,88 +155,13 @@ def test_first_token_constant_and_single_token_boundary():
     assert all(p.grad is None for p in student.parameters())
 
 
-def test_cli_rejects_invalid_khop_combinations(tmp_path):
+def test_cli_rejects_invalid_khop_settings(tmp_path):
     _, _, data, stage1 = make_inputs(tmp_path)
-    base = ['--mode', 'stage3', '--model-path', 'm', '--data-dir', str(data),
-            '--output-dir', 'o', '--stage1-student', str(stage1)]
-    khop = ['--replay-strategy', 'khop', '--replay-backend', 'reference', '--replay-dtype', 'float32']
-    assert trainer.parse(base + khop).replay_strategy == 'khop'
-    rejections = [
-        khop + ['--mode', 'opd'],
-        khop + ['--replay-microbatch-size', '2'],
-        ['--replay-strategy', 'khop', '--replay-backend', 'fused-backward', '--replay-dtype', 'float32'],
-        ['--replay-strategy', 'khop', '--replay-backend', 'reference'],
-        khop + ['--khop-history-source', 'rollout'],
-    ]
-    for extra in rejections:
+    base = ['--model-path', 'm', '--data-dir', str(data), '--output-dir', 'o', '--stage1-student', str(stage1)]
+    assert trainer.parse(base).khop_hops == 3
+    for extra in (['--khop-hops', '-1'], ['--exact-window', '-1'], ['--khop-history-backend', 'flash']):
         with pytest.raises(SystemExit):
             trainer.parse(base + extra)
-
-
-def run_trainer(model, data, stage1, output, extra):
-    args = ['--mode', 'stage3', '--model-path', 'tiny', '--data-dir', str(data), '--steps', '1',
-            '--global-batch-size', '2', '--tbptt', '2', '--max-prompt-length', '8',
-            '--max-response-length', '5', '--save-every', '1', '--eval-every', '1',
-            '--eval-records', '2', '--stage1-student', str(stage1), '--output-dir', str(output)]
-    with patch('ouro_depth.latent.teacher.load_teacher', side_effect=lambda *a, **k: deepcopy(model)):
-        trainer.main(args + extra)
-    rows = [json.loads(line) for line in (output / 'rank-0.jsonl').read_text().splitlines()]
-    return {row['event']: row for row in rows if row['event'] in ('ready', 'update')}, \
-           [row for row in rows if row['event'] == 'replay_progress']
-
-
-@pytest.fixture(scope='module')
-def strategy_runs(tmp_path_factory):
-    tmp = tmp_path_factory.mktemp('khop-strategy')
-    model, _, data, stage1 = make_inputs(tmp)
-    events = {}
-    events['tbptt'] = run_trainer(model, data, stage1, tmp / 'tbptt', [])
-    events['khop'] = run_trainer(model, data, stage1, tmp / 'khop',
-        ['--replay-strategy', 'khop', '--replay-backend', 'reference', '--replay-dtype', 'float32'])
-    return dict(events=events, data=data, stage1=stage1, output=tmp)
-
-
-def legacy_metadata(data, stage1, replay_backend):
-    return dict(model_path='tiny', mode='stage3', steps=1, global_batch_size=2, tbptt=2,
-        max_prompt_length=8, max_response_length=5, seed=20260915, save_every=1, eval_every=1,
-        eval_records=2, rollout_kv_gib=6., rollout_gpu_memory=.35, lr=1e-6, weight_decay=.01,
-        stage3_aux_weight=.1, max_replay_logp_error=0., replay_microbatch_size=1,
-        replay_backend=replay_backend, no_checkpoint=False, prompt_chunk_size=0,
-        world=1, data_manifest_sha256=hashlib.sha256((data / 'manifest.json').read_bytes()).hexdigest(),
-        recipe='s6-direct-decode-v1', sampling='complete-openr1-prompts-v1',
-        response_boundary='include-first-and-eos', optimizer='adamw', betas=[.9, .999],
-        schedule='constant', gradient_reduction='sum-global-token-normalized', temperature=1.,
-        top_p=1., rollout_n=1, ppo_epochs=1, update_minibatch=2, replay_microbatch=1,
-        stage1_origin=str(stage1.resolve()), replay_numerics='reference', eos_ids=[2])
-
-
-def test_metadata_default_matches_legacy_and_khop_adds_keys(strategy_runs):
-    events, data, stage1 = strategy_runs['events'], strategy_runs['data'], strategy_runs['stage1']
-    assert events['tbptt'][0]['ready']['metadata'] == legacy_metadata(data, stage1, 'auto')
-    expected = dict(legacy_metadata(data, stage1, 'reference'), replay_strategy='khop',
-                    khop_hops=3, khop_history_source='collect', replay_dtype='float32')
-    assert events['khop'][0]['ready']['metadata'] == expected
-    tbptt_timings = {'prefill_seconds', 'forward_loss_seconds', 'backward_recompute_seconds'}
-    khop_timings = {'history_collect_seconds', 'parallel_forward_seconds',
-                    'adjoint_seconds', 'parameter_vjp_seconds'}
-    for row in events['tbptt'][1]:
-        assert tbptt_timings <= set(row) and not khop_timings & set(row)
-    for row in events['khop'][1]:
-        assert khop_timings <= set(row) and not tbptt_timings & set(row)
-
-
-def test_khop_optimizer_update_end_to_end(strategy_runs):
-    events, output = strategy_runs['events'], strategy_runs['output']
-    update = events['khop'][0]['update']
-    assert update['completed_steps'] == 1 and update['grad_norm'] > 0
-    assert math.isfinite(update['objective'])
-    assert update['supervised_positions'] == 10
-    before = torch.load(strategy_runs['stage1'], weights_only=False)['student']
-    after = torch.load(output / 'khop' / 'student-1.pt', weights_only=False)['student']
-    assert before.keys() == after.keys()
-    assert any(not torch.equal(before[k], after[k]) for k in before)
-    checkpoint = torch.load(output / 'khop' / 'checkpoint-000001' / 'training.pt', weights_only=False)
-    assert checkpoint['metadata']['replay_strategy'] == 'khop' and checkpoint['metadata']['khop_hops'] == 3
 
 
 @pytest.mark.parametrize('dtype', [torch.float32, torch.bfloat16])

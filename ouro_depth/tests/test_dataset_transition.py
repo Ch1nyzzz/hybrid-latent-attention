@@ -14,7 +14,7 @@ def test_new_corpus_initialization_and_resume(tmp_path):
  (data/'manifest.json').write_text('{"fixture":"new-data"}')
  new=hashlib.sha256((data/'manifest.json').read_bytes()).hexdigest()
  out=tmp_path/'out'
- common=['--mode','stage3','--model-path','tiny','--data-dir',str(data),'--steps','2','--global-batch-size','2','--tbptt','2','--max-prompt-length','8','--max-response-length','5','--save-every','1','--eval-every','2','--eval-records','2','--output-dir',str(out),'--expected-stage1-manifest',old]
+ common=['--opd-divergence','fkl','--model-path','tiny','--data-dir',str(data),'--steps','2','--global-batch-size','2','--max-prompt-length','8','--max-response-length','5','--save-every','1','--output-dir',str(out),'--expected-stage1-manifest',old]
  with patch('ouro_depth.latent.teacher.load_teacher',side_effect=lambda *a,**kw:deepcopy(model)),patch('ouro_depth.latent.vllm_rollout.VLLMRollout',reference_worker(model)):
   trainer.main(common+['--stage1-student',str(stage1),'--stop-after','1'])
   trainer.main(common+['--resume',str(out/'checkpoint-000001')])

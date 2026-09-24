@@ -8,7 +8,7 @@ import time
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from .batched_engine import BatchedRollingEngine
-from .batched_recipe import memory_bounded_fkl
+from .fkl import memory_bounded_fkl
 from .decode_training import token_logp
 
 

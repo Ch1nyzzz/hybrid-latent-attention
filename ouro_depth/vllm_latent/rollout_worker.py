@@ -48,36 +48,16 @@ def install_student(model, path, version):
     model = unwrap_model(model)
     payload = torch.load(path, map_location='cpu', weights_only=False)
     if 'backbone' in payload:
-        raise ValueError('Full-parameter packages require update_s6_backbone')
+        raise ValueError('Full-parameter packages cannot be synced into a rollout engine')
     ack = apply_student(model, payload, version)
     torch.cuda.synchronize()
     return ack
-
-
-def install_full_parameter(model, path, version):
-    """One versioned backbone+latent payload under one ack; the eval init path shares the loader."""
-    import torch
-    from .backbone_sync import apply_backbone_update, package_backbone, prepare_backbone_update
-    model = unwrap_model(model)
-    payload = torch.load(path, map_location='cpu', weights_only=False)
-    backbone = package_backbone(payload)
-    if backbone is None:
-        raise ValueError('update_s6_backbone requires a full-parameter package')
-    prepared = prepare_backbone_update(model, backbone)
-    tensors = apply_student(model, payload, version)['tensors'] + apply_backbone_update(model, backbone, prepared=prepared)
-    torch.cuda.synchronize()
-    return {'version': version, 'tensors': tensors}
 
 
 class S6RolloutWorkerExtension:
     """Named worker RPC: only a path and integer cross the vLLM boundary."""
     def update_s6_student(self, path, version):
         ack = install_student(self.model_runner.get_model(), path, version)
-        self.s6_weight_version = version
-        return ack
-
-    def update_s6_backbone(self, path, version):
-        ack = install_full_parameter(self.model_runner.get_model(), path, version)
         self.s6_weight_version = version
         return ack
 
@@ -201,8 +181,7 @@ def main():
                     capacity = dict(capacity, kv_fits=need <= config['kv_bytes'], window_need_bytes=need)
                 if not capacity['kv_fits']:
                     raise RuntimeError('Insufficient KV capacity: preemption would change S6 semantics: '+str(capacity))
-            entry = 'update_s6_backbone' if request.get('full_parameter') else 'update_s6_student'
-            ack = llm.collective_rpc(entry, args=(request['weights'], version))
+            ack = llm.collective_rpc('update_s6_student', args=(request['weights'], version))
             if len(ack) != 1 or ack[0]['version'] != version:
                 raise RuntimeError('Worker did not acknowledge current weights')
             # Prefix caching is disabled and the previous synchronous generate drained

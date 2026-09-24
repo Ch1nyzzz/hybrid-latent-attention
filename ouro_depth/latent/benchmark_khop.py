@@ -192,7 +192,7 @@ def main():
                 lam_attn=a.aux,normalizer=float(n),use_checkpoint=False)
         handle.remove()
         delta=(captured[-1].float()-serial_logits[:,1:].float())
-        from .batched_recipe import memory_bounded_fkl
+        from .fkl import memory_bounded_fkl
         constant=memory_bounded_fkl(serial_logits[:,:1],tl[:,prompt-1:prompt],torch.ones(1,1,device='cuda',dtype=torch.bool))/n
         report['forward_check']=dict(logits_max_abs=float(delta.abs().max()),logits_rms=float(delta.square().mean().sqrt()),
             objective_abs_error=abs(float(check_loss+constant)-(report['methods']['full'] if 'full' in report['methods'] else report['methods']['tbptt32'])['checks']['objective']))

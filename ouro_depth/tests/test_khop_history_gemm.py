@@ -39,7 +39,7 @@ def test_gemm_backend_matches_dense_khop(backend, tol):
     assert live and all((got[k] is None) == (ref[k] is None) for k in ref)
     a = torch.cat([got[k].flatten() for k in live]); b = torch.cat([ref[k].flatten() for k in live])
     assert float((a - b).norm() / b.norm()) <= tol
-    assert any('.inter_s.' in k for k in live)  # the gated writer is trained through history
+    assert any('.cand_s.' in k for k in live)  # the writer is trained through history
 
 
 def test_unknown_backend_rejected():
@@ -50,16 +50,16 @@ def test_unknown_backend_rejected():
 def test_interval_driver_and_trainer_forward_backend():
     from ouro_depth.trisol.run_decode_math_intervals import training_args
     from ouro_depth.latent import train_decode
-    argv = training_args('opd', 'm', 'd', 'o', 's', 10, train_backbone=True, history_backend='gemm-bf16')
+    argv = training_args('m', 'd', 'o', 's', 10, history_backend='gemm-bf16')
     assert argv[argv.index('--khop-history-backend') + 1] == 'gemm-bf16'
-    default = training_args('opd', 'm', 'd', 'o', 's', 10)
+    default = training_args('m', 'd', 'o', 's', 10)
     assert default[default.index('--khop-history-backend') + 1] == 'dense'
     args = train_decode.parse(argv[argv.index('ouro_depth.latent.train_decode') + 1:])
     assert (args.khop_history_backend, args.khop_history_chunk, args.khop_history_max_elements) == ('gemm-bf16', 1024, 1 << 27)
 
 
 def test_latent_only_interval_keeps_explicit_lr_and_divergence(monkeypatch, tmp_path):
-    """Without --train-backbone the driver must still pass --lr / --opd-divergence (no 3e-5 default)."""
+    """The driver must pass --lr / --opd-divergence explicitly (no trainer-default fallback)."""
     import sys
     from ouro_depth.trisol import run_decode_math_intervals as driver
     seen = []
@@ -68,7 +68,7 @@ def test_latent_only_interval_keeps_explicit_lr_and_divergence(monkeypatch, tmp_
         seen.append(argv)
         raise SystemExit(0)
     monkeypatch.setattr(driver.subprocess, 'run', fake_run)
-    monkeypatch.setattr(sys, 'argv', ['x', '--mode', 'opd', '--opd-divergence', 'fkl', '--lr', '1e-5',
+    monkeypatch.setattr(sys, 'argv', ['x', '--opd-divergence', 'fkl', '--lr', '1e-5',
         '--khop-history-backend', 'gemm-bf16', '--model', 'm', '--data', 'd', '--math-data', 'md',
         '--student', 's', '--output', str(tmp_path)])
     try:
@@ -77,7 +77,7 @@ def test_latent_only_interval_keeps_explicit_lr_and_divergence(monkeypatch, tmp_
         pass
     argv = seen[0]
     assert argv[argv.index('--lr') + 1] == '1e-05' and argv[argv.index('--opd-divergence') + 1] == 'fkl'
-    assert '--train-backbone' not in argv and argv[argv.index('--khop-history-backend') + 1] == 'gemm-bf16'
+    assert argv[argv.index('--khop-history-backend') + 1] == 'gemm-bf16'
 
 
 def test_linear_warmup_schedule_and_resume_state():
@@ -97,6 +97,6 @@ def test_linear_warmup_schedule_and_resume_state():
     g = fresh.param_groups[0]
     g['lr'] = g.setdefault('initial_lr', g['lr']) * warmup_factor(3, 10)  # resume mid-warmup
     assert seen == pytest.approx([3e-6, 6e-6, 9e-6]) and g['lr'] == pytest.approx(1.2e-5)
-    argv = training_args('opd', 'm', 'd', 'o', 's', 10, lr=3e-5, warmup_steps=10)
+    argv = training_args('m', 'd', 'o', 's', 10, lr=3e-5, warmup_steps=10)
     assert parse(argv[argv.index('ouro_depth.latent.train_decode') + 1:]).warmup_steps == 10
-    assert '--warmup-steps' not in training_args('opd', 'm', 'd', 'o', 's', 10)
+    assert '--warmup-steps' not in training_args('m', 'd', 'o', 's', 10)

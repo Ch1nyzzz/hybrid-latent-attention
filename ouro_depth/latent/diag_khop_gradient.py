@@ -29,7 +29,7 @@ import time
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from .batched_recipe import memory_bounded_fkl
+from .fkl import memory_bounded_fkl
 from .decode_training import PromptIndex, Trajectory, replay
 from .register import apply_rope
 from .training_common import TeacherTargets
