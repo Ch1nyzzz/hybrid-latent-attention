@@ -1,10 +1,10 @@
-# 研究目标：与循环深度无关、无需重建的 loop-invariant latent cache
+# 研究目标（Hybrid Latent Attention）：与循环深度无关、无需重建的 loop-invariant latent cache
 
 2026-09-14 定稿，依据本日讨论。本文是仓库唯一的研究方向；此前"训练更深循环学会更强推理"一线（V1–V10、Huginn）的代码与报告已于同日清理出工作区，完整保留在 git 历史（提交 `62f4130` 及之前）。
 
 ## 当前实现边界（2026-09-16）
 
-长期目标不变；当前方法与证据见 [S6 方法报告](ouro_depth/S6_METHOD_REPORT.md)：固定 T=4 的终态 block writer、第一轮独立 latent、当前 chunk 精确 K/V 与历史直接 latent attention。本文下述第一版 gated/decoupled-RoPE 架构及随机 writer-depth 训练属于历史设计，相关旧训练实现已移除。S6 的可训练 dense reader 只在 PCA 初始化时保证频率对齐，尚未证明训练后严格等变或 adaptive-depth 能力。
+长期目标不变；当前方法与证据见 [S6 方法报告](hla/S6_METHOD_REPORT.md)：固定 T=4 的终态 block writer、第一轮独立 latent、当前 chunk 精确 K/V 与历史直接 latent attention。本文下述第一版 gated/decoupled-RoPE 架构及随机 writer-depth 训练属于历史设计，相关旧训练实现已移除。S6 的可训练 dense reader 只在 PCA 初始化时保证频率对齐，尚未证明训练后严格等变或 adaptive-depth 能力。
 
 ## 1. 一句话目标
 
@@ -79,9 +79,9 @@ s_ij,t = (R_i q_{i,t})^T R_j W_t c_j = q_{i,t}^T R_{j-i} W_t c_j
 
 Teacher 只能是 base Ouro-1.4B 在预训练深度 **T=4**（T=8 是外推，AIME24 从 22.9 掉到 10.6），矩阵为 4×4；T=8 的矩阵等有 T=8 训练过的模型再补。Ouro 官方的 early exit 只选择送 lm_head 的 hidden，所有 token 所有轮的 K/V 都照算，所以 teacher 里没有"历史 token 真早退"的 ground truth；右上角 `τ < t` 的目标定义为：用 token 自己前 τ 轮构造的 `c`，逼近 teacher 全深度 reader 的 attention 行为。数据不落盘：teacher 在线前向（钩子取每层每轮的 attention 输入与输出），student 同步算 loss。语料 99M token（OpenR1 数学轨迹 60% + fineweb-edu 40%，2048 token 块）。
 
-**Step 0，线性探针**（`ouro_depth/latent/probe_linear.py`，1 GPU）：逐层 ridge 从 `concat(h_1..h_τ)` 预测 `k_proj(h_t), v_proj(h_t)`，在留出块上报告 attention KL、相对输出误差、R² 的 (τ=0..4) × (t=1..4) 矩阵。τ ≥ t 的格子按构造为精确，信息量在 τ < t。
+**Step 0，线性探针**（`hla/latent/probe_linear.py`，1 GPU）：逐层 ridge 从 `concat(h_1..h_τ)` 预测 `k_proj(h_t), v_proj(h_t)`，在留出块上报告 attention KL、相对输出误差、R² 的 (τ=0..4) × (t=1..4) 矩阵。τ ≥ t 的格子按构造为精确，信息量在 τ < t。
 
-**Step 1，逐层蒸馏**（`ouro_depth/latent/train_stage1.py`，7 GPU，`register.py` 为 student）：body 冻结、teacher forcing；每层学写寄存器 `F_φ`、`P_R` 和每轮的 `A_t, Q_t^R, B_t`（r=512、RoPE 分支 64 维、K/V 共用一个 latent，与 vLLM MLA backend 对齐；24 层共 441M 参数，cache 27 KB/token 对比 exact T=4 的 768 KB）。损失 = attention KL + 相对输出 MSE；每个 token 每个 reader 轮随机指定 writer 深度（一半锁步、一半均匀），使整个 τ×t 矩阵都有梯度。评测输出 τ×t 的 KL 与输出误差矩阵。
+**Step 1，逐层蒸馏**（`hla/latent/train_stage1.py`，7 GPU，`register.py` 为 student）：body 冻结、teacher forcing；每层学写寄存器 `F_φ`、`P_R` 和每轮的 `A_t, Q_t^R, B_t`（r=512、RoPE 分支 64 维、K/V 共用一个 latent，与 vLLM MLA backend 对齐；24 层共 441M 参数，cache 27 KB/token 对比 exact T=4 的 768 KB）。损失 = attention KL + 相对输出 MSE；每个 token 每个 reader 轮随机指定 writer 深度（一半锁步、一半均匀），使整个 τ×t 矩阵都有梯度。评测输出 τ×t 的 KL 与输出误差矩阵。
 
 **判读（两条路线）**：
 
