@@ -21,26 +21,33 @@ from ouro_depth.latent.training_common import FULL_PARAMETER_SEMANTICS
 FDO = '{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY"}'
 
 
-def training_args(mode, model, data, output, stage1, target, resume=None, train_backbone=False, divergence="fkl", lr=3e-5, backbone_lr=1e-6, expected_stage1_manifest=None):
+def training_args(mode, model, data, output, stage1, target, resume=None, train_backbone=False, divergence="fkl", lr=3e-5, backbone_lr=1e-6, expected_stage1_manifest=None, history_backend='dense', warmup_steps=0):
     args=[sys.executable,'-m','torch.distributed.run','--standalone','--nproc-per-node=8',
         '-m','ouro_depth.latent.train_decode','--mode',mode,'--model-path',model,
         '--data-dir',data,'--output-dir',str(output),'--steps','200','--stop-after',str(target),
         '--global-batch-size','128','--lr',str(lr),'--save-every','10','--eval-every','10',
         '--validation-backend','external-math500','--replay-backend','serving',
-        '--replay-dtype','bfloat16','--max-prompt-length','1024','--max-response-length','2048']
-    if mode != 'opd':
-        raise ValueError('Only OPD intervals are supported')
-    args+=['--replay-strategy','khop','--khop-hops','3','--khop-history-source','rollout',
-       '--replay-microbatch-size','1','--rollout-kv-gib','6',
-       '--opd-divergence',divergence,'--stage3-aux-weight','0',
-       '--max-replay-logp-error','0','--max-replay-mean-error','.03',
-       '--max-replay-outside-fraction','.01']
+        '--replay-dtype','bfloat16','--max-prompt-length','1024',
+        '--max-response-length',os.environ.get('S6_OPD_MAX_RESPONSE','2048')]
+    if mode=='stage3':
+        args+=['--replay-strategy','parallel-iter','--parallel-rounds','2',
+               '--replay-microbatch-size','8','--parallel-max-batch-tokens','16384']
+    else:
+        args+=['--replay-strategy','khop','--khop-hops','3','--khop-history-source','rollout',
+               '--replay-microbatch-size','1','--rollout-kv-gib',os.environ.get('S6_ROLLOUT_KV_GIB','6'),
+               '--opd-divergence',divergence,'--stage3-aux-weight','0',
+               '--max-replay-logp-error','0','--max-replay-mean-error','.03',
+               '--max-replay-outside-fraction','.01','--khop-history-backend',history_backend]
     if train_backbone:
         if mode != 'opd':
             raise ValueError('Full-parameter intervals require OPD')
         args += ['--train-backbone', '--backbone-lr', str(backbone_lr)]
     if expected_stage1_manifest:
         args += ['--expected-stage1-manifest', expected_stage1_manifest]
+    if warmup_steps:
+        args += ['--warmup-steps', str(warmup_steps)]
+    if int(os.environ.get('S6_EXACT_WINDOW', '0') or 0):
+        args += ['--exact-window', os.environ['S6_EXACT_WINDOW']]
     args += ['--resume',str(resume)] if resume else ['--stage1-student',stage1]
     return args
 
@@ -94,8 +101,15 @@ def aggregate(directory, rows, *, shards=8, samples=1, max_new=8192):
         s=json.loads((directory/f'summary{shard}.json').read_text())
         if (s['shard']!=shard or s['nshards']!=shards or s['n_samples']!=samples
             or s['max_new']!=max_new or s['backend']!='TRITON_ATTN'
-            or s['cudagraph_mode']!='FULL_DECODE_ONLY' or s.get('kv_fits') is not True):
+            or s['cudagraph_mode']!='FULL_DECODE_ONLY'
+            or (s.get('kv_fits') is not True and not s.get('latent_window'))):
             raise ValueError('MATH500 protocol or KV capacity mismatch')
+        if s.get('latent_window'):
+            # The startup pool estimate budgets sliding-window layers at full length (kv_fits is meaningless);
+            # the scheduler marker proves that no request was preempted and re-prefilled.
+            logs=sorted((directory/f'worker-{shard}').glob('engine-attempt-*.log'))
+            if not logs or any('S6_PREEMPT' in l.read_text(errors='replace') for l in logs):
+                raise ValueError('Exact-window MATH500 shard was preempted or lacks its engine log')
         records=[json.loads(l) for l in (directory/f'shard{shard}.jsonl').read_text().splitlines()]
         expected_shard={(r['id'],i) for r in rows[shard::shards] for i in range(samples)}
         found={(r['id'],r['sample']) for r in records}
@@ -124,7 +138,8 @@ def evaluate(root, model, student, data, output, *, smoke=False):
     max_new=16 if smoke else 8192
     protocol=dict(student=str(Path(student).resolve()),data_sha256=hashlib.sha256(Path(data).read_bytes()).hexdigest(),
         model=model,shards=8,n=1,temperature=1.,top_p=.7,seed=20260915,max_new=max_new,
-        max_model_len=10240,backend='TRITON_ATTN',cudagraph='FULL_DECODE_ONLY',smoke=smoke)
+        max_model_len=10240,backend='TRITON_ATTN',cudagraph='FULL_DECODE_ONLY',smoke=smoke,
+        latent_window=int(os.environ.get('S6_EXACT_WINDOW','0') or 0))
     protocol_path=output/'protocol.json'
     if protocol_path.exists() and json.loads(protocol_path.read_text())!=protocol:
         raise ValueError('Refusing to mix evaluation protocols')
@@ -138,6 +153,9 @@ def evaluate(root, model, student, data, output, *, smoke=False):
             '--max-new',str(max_new),'--max-model-len','10240','--seed','20260915',
             '--max-num-seqs','64','--auto-concurrency','--backend','TRITON_ATTN',
             '--compile-config',FDO,'--engine-log',str(work/'engine.log')]
+        if protocol['latent_window']:
+            # the startup KV estimate budgets sliding-window layers at full length: fixed 64 concurrency, no auto
+            argv.remove('--auto-concurrency');argv+=['--window',str(protocol['latent_window'])]
         if smoke:argv+=['--limit','8']
         run_inference_shard(argv,root,work,gpu)
     start=time.monotonic()
@@ -151,12 +169,14 @@ def evaluate(root, model, student, data, output, *, smoke=False):
 
 def main():
     p=argparse.ArgumentParser()
-    p.add_argument('--mode',choices=['opd'],required=True)
+    p.add_argument('--mode',choices=['stage3','opd'],required=True)
     p.add_argument('--train-backbone', action='store_true')
     p.add_argument('--expected-stage1-manifest', default=None)
     p.add_argument('--opd-divergence', choices=['rkl','fkl'], default='fkl')
     p.add_argument('--lr', type=float, default=3e-5)
     p.add_argument('--backbone-lr', type=float, default=1e-6)
+    p.add_argument('--khop-history-backend', default='dense', choices=['dense','gemm-fp32','gemm-tf32','gemm-bf16'])
+    p.add_argument('--warmup-steps', type=int, default=0)
     p.add_argument('--resume-checkpoint',default=os.environ.get('S6_RESUME_CHECKPOINT'))
     for name in ('model','data','math-data','student','output'):p.add_argument('--'+name,required=True)
     a=p.parse_args();root=Path(__file__).resolve().parents[2];out=Path(a.output)
@@ -167,14 +187,21 @@ def main():
     if not resume:evaluate(root,a.model,a.student,a.math_data,out/'inference-smoke',smoke=True)
     completed=json.loads((Path(resume)/'complete.json').read_text())['completed_steps'] if resume else 0
     if completed%10:raise ValueError('Resume checkpoint must lie on the 10-update interval')
-    if resume:
+    if resume and os.environ.get('S6_EXTERNAL_EVAL')!='1':
         # Platform archives training.pt; the vLLM loader accepts its student/cfg payload.
         evaluate(root,a.model,str(Path(resume)/'training.pt'),a.math_data,out/f'math500/step-{completed:06d}')
-    for target in range(completed+10,201,10):
-        print('TRAIN_INTERVAL '+json.dumps(dict(mode=a.mode,start=target-10,end=target,global_batch=128)),flush=True)
-        kwargs = dict(train_backbone=a.train_backbone, divergence=a.opd_divergence, lr=a.lr, backbone_lr=a.backbone_lr)
+    # S6_EXTERNAL_EVAL=1: train 0..200 in one process (checkpoint every 10), MATH500 runs in separate eval jobs.
+    external=os.environ.get('S6_EXTERNAL_EVAL')=='1'
+    for target in ([200] if external else range(completed+10,201,10)):
+        print('TRAIN_INTERVAL '+json.dumps(dict(mode=a.mode,start=completed if external else target-10,end=target,global_batch=128)),flush=True)
+        # Divergence and latent LR are explicit in both modes (latent-only must not fall back to defaults).
+        kwargs = dict(divergence=a.opd_divergence, lr=a.lr)
+        if a.train_backbone:
+            kwargs.update(train_backbone=True, backbone_lr=a.backbone_lr)
         if a.expected_stage1_manifest:
             kwargs['expected_stage1_manifest'] = a.expected_stage1_manifest
+        kwargs['history_backend'] = a.khop_history_backend
+        kwargs['warmup_steps'] = a.warmup_steps
         subprocess.run(training_args(a.mode,a.model,a.data,train,a.student,target,resume,**kwargs),check=True)
         checkpoint=train/f'checkpoint-{target:06d}'
         marker=json.loads((checkpoint/'complete.json').read_text())
@@ -182,7 +209,8 @@ def main():
             raise RuntimeError('Incomplete training checkpoint')
         # Full-parameter runs export one backbone+latent package under a distinct name.
         name='opd_student' if marker.get('semantics')==FULL_PARAMETER_SEMANTICS else 'student'
-        evaluate(root,a.model,str(train/f'{name}-{target}.pt'),a.math_data,out/f'math500/step-{target:06d}')
+        if not external:
+            evaluate(root,a.model,str(train/f'{name}-{target}.pt'),a.math_data,out/f'math500/step-{target:06d}')
         resume=checkpoint
     print('TRAIN_MATH200_COMPLETE '+a.mode,flush=True)
 

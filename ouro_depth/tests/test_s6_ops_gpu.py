@@ -40,7 +40,7 @@ def assert_history(o, lse, o_ref, lse_ref, batch):
     torch.testing.assert_close(lse, lse_ref, atol=2e-2, rtol=0)
 
 
-@mark.parametrize('width', [512, 256])
+@mark.parametrize('width', [1024, 512, 256])
 @mark.parametrize('block', [16, 32])
 @mark.parametrize('splits', [1, 4, 16])
 def test_history_attention_triton_matches_reference(width, block, splits):
@@ -266,3 +266,43 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+@mark.parametrize('lk,lv', [(1024, 1024), (1024, 512)])
+@mark.parametrize('splits', [1, 8, 32])
+def test_wide_pipelined_decode_is_bitwise_vllm(lk, lv, splits):
+    """num_stages=2 for BLOCK_DMODEL>=1024 changes only the pipeline, never the arithmetic."""
+    torch.manual_seed(1)
+    block, num_blocks = 16, 1024
+    k = torch.randn(num_blocks, 1, block, lk, dtype=BF16, device=CUDA)
+    v = torch.randn(num_blocks, 1, block, lv, dtype=BF16, device=CUDA)
+    for batch in (1, 8, 52):
+        ctx = torch.tensor(([5000, 1000, 17, 1, 0, 3071, 4096] * 8)[:batch], dtype=I32, device=CUDA)
+        table = torch.randint(0, num_blocks, (batch, -(-5000 // block)), dtype=I32, device=CUDA)
+        q = torch.randn(batch, HEADS, lk, dtype=BF16, device=CUDA)
+        outs = []
+        for stages in (2, 0):
+            s6_ops.WIDE_DECODE_STAGES = stages
+            ws = s6_ops.S6Workspace(HEADS, lv, batch * splits)
+            outs.append(s6_ops.history_attention_kv(q, k, v, table, ctx, SCALE, splits, ws, ones(), ones(), 'triton', empty=ctx == 0))
+        s6_ops.WIDE_DECODE_STAGES = 2
+        assert not s6_ops._WIDE_FAILED, 'pipelined launch fell back on this GPU'
+        assert torch.equal(outs[0][0], outs[1][0]) and torch.equal(outs[0][1], outs[1][1])
+
+
+def test_wide_history_attention_replays_inside_cuda_graph():
+    torch.manual_seed(2)
+    width, block, batch, splits, num_blocks = 1024, 16, 8, 16, 256
+    ws = s6_ops.S6Workspace(HEADS, width, batch * splits)
+    cache = torch.randn(num_blocks, 1, block, 2 * width, dtype=BF16, device=CUDA)
+    table = torch.randint(0, num_blocks, (batch, 64), dtype=I32, device=CUDA)
+    ctx = torch.tensor([1000, 1, 0, 17, 999, 512, 64, 3], dtype=I32, device=CUDA)
+    q = torch.randn(batch, HEADS, width, dtype=BF16, device=CUDA)
+    s6_ops.history_attention(q, cache, table, ctx, SCALE, splits, ws, ones(), ones(), 'triton', empty=ctx == 0)
+    torch.cuda.synchronize()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        o, lse = s6_ops.history_attention(q, cache, table, ctx, SCALE, splits, ws, ones(), ones(), 'triton', empty=ctx == 0)
+    q.copy_(torch.randn_like(q)); graph.replay(); torch.cuda.synchronize()
+    o_eager, lse_eager = s6_ops.history_attention(q, cache, table, ctx, SCALE, splits, ws, ones(), ones(), 'triton', empty=ctx == 0)
+    assert torch.equal(o, o_eager) and torch.equal(lse, lse_eager)

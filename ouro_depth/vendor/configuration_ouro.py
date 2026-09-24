@@ -171,8 +171,14 @@ class OuroConfig(PretrainedConfig):
         attention_dropout=0.0,
         total_ut_steps=4,
         early_exit_threshold=1.0,
+        pad_token_id=None,
+        bos_token_id=None,
+        eos_token_id=None,
         **kwargs,
     ):
+        self.pad_token_id = pad_token_id
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
         self.hidden_size = hidden_size

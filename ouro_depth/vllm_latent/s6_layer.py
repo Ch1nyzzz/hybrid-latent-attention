@@ -50,8 +50,9 @@ class StepContext:
     """
 
     def __init__(self, positions, query_start_loc, seq_lens, max_query_len, num_tokens, tables, scale, backends,
-                 workspace=None, num_kv_splits=1, rope_flat=False):
+                 workspace=None, num_kv_splits=1, rope_flat=False, window=0, max_seqlen_k=0):
         device = positions.device
+        self.window, self.max_seqlen_k = window, max_seqlen_k
         self.positions, self.tables, self.scale, self.backends = positions, tables, scale, backends
         self.workspace, self.num_kv_splits, self.rope_flat = workspace, num_kv_splits, rope_flat
         self.history_needed = True   # the adapter clears it on eager prompt-only steps (no token has history)
@@ -64,6 +65,9 @@ class StepContext:
         history = s6_ops.history_lengths(seq_lens, query_start_loc)
         self.ctx = torch.where(self.valid, history[self.token_requests], 0)
         self.invalid, self.empty = ~self.valid, self.ctx == 0  # step-invariant masks, shared by every layer x loop
+        # Exact window: the last ``window`` history rows are read exactly, the latent covers the rows before them.
+        self.ctx_latent = (self.ctx - window).clamp_(min=0) if window else self.ctx
+        self.empty_latent = self.ctx_latent == 0
         self._block_tables = {}
         if workspace is not None:
             workspace.ensure(device)
@@ -80,7 +84,7 @@ class StepContext:
         return latent_query(q_pre_rope, A, self.positions, self.tables[width], self.backends.rope, self.rope_flat)
 
 
-def attend(sl, loop, q_lat, q_rope, k_rope, v, cache, block_table, k_scale, v_scale, ctx):
+def attend(sl, loop, q_lat, q_rope, k_rope, v, cache, block_table, k_scale, v_scale, ctx, window=None):
     """One softmax over the paged latent history (fully visible) and the causal current chunk.
 
     ``q_lat`` comes from ``StepContext.latent_query`` (computed before the exact RoPE); ``q_rope``,
@@ -88,14 +92,25 @@ def attend(sl, loop, q_lat, q_rope, k_rope, v, cache, block_table, k_scale, v_sc
     None (no history); ``block_table`` is the per-request metadata table. Returns ``[T,H,d]`` with
     ``~valid`` rows zeroed.
     """
-    o_chunk, lse_chunk = s6_ops.chunk_attention(q_rope, k_rope, v, ctx.query_start_loc, ctx.max_query_len,
-                                                ctx.invalid, ctx.scale, ctx.backends.chunk)
+    # Decode steps (the ones CUDA graphs capture): one FA2 paged call over the exact window plus the current token,
+    # already written to the exact cache. Prefill / mixed steps keep the causal chunk + gathered window below.
+    fused = window is not None and ctx.md_present and ctx.max_query_len == 1
+    if fused:
+        o_chunk, lse_chunk = s6_ops.window_attention_fa(q_rope, window[0], window[1], ctx.query_start_loc, ctx.seq_lens,
+                                                        ctx.window, ctx.scale, ctx.max_seqlen_k, ctx.invalid)
+    else:
+        o_chunk, lse_chunk = s6_ops.chunk_attention(q_rope, k_rope, v, ctx.query_start_loc, ctx.max_query_len,
+                                                    ctx.invalid, ctx.scale, ctx.backends.chunk)
     if cache is None or not ctx.md_present or not ctx.history_needed:
         return o_chunk.masked_fill_(ctx.invalid[:, None, None], 0)  # FA leaves padding rows as scratch
+    if window is not None and not fused:  # (exact cache, its block table): rows [ctx - W, ctx) exactly
+        o_win, lse_win = s6_ops.window_history_fa(q_rope, window[0], ctx.block_table(window[1]), ctx.ctx, ctx.window,
+                                                  ctx.scale, ctx.max_seqlen_k, ctx.empty)
+        o_chunk, lse_chunk = s6_ops.merge_lse(o_chunk, lse_chunk, o_win, lse_win)
     _, B, _ = sl.readers(loop)
-    o_hist, lse_hist = s6_ops.history_attention(q_lat, cache, ctx.block_table(block_table), ctx.ctx, ctx.scale,
+    o_hist, lse_hist = s6_ops.history_attention(q_lat, cache, ctx.block_table(block_table), ctx.ctx_latent, ctx.scale,
                                                 ctx.num_kv_splits, ctx.workspace, k_scale, v_scale,
-                                                ctx.backends.history, ctx.empty)
+                                                ctx.backends.history, ctx.empty_latent)
     o_hist = torch.einsum('thr,hrd->thd', o_hist, B).contiguous()
     return s6_ops.merge_states(o_hist, lse_hist, o_chunk, lse_chunk, ctx.invalid, ctx.backends.merge)
 

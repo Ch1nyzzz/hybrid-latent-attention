@@ -34,7 +34,7 @@ def safe_request_batch(pool, engine_limit, max_model_len, n):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True); p.add_argument("--student", default=""); p.add_argument("--data", required=True); p.add_argument("--output", required=True)
-    p.add_argument("--base", action="store_true"); p.add_argument("--attention-config", default="", help="JSON for vLLM attention_config (e.g. use_prefill_decode_attention)"); p.add_argument("--backend", default=""); p.add_argument("--loops", type=int, default=4)
+    p.add_argument("--base", action="store_true"); p.add_argument("--attention-config", default="", help="JSON for vLLM attention_config (e.g. use_prefill_decode_attention)"); p.add_argument("--backend", default=""); p.add_argument("--loops", type=int, default=4); p.add_argument("--window", type=int, default=0, help="exact recent-window rows (0 = production S6)")
     p.add_argument("--compile-config", default='{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY"}', help="JSON compilation_config (e.g. {\"cudagraph_mode\":\"FULL_DECODE_ONLY\"}); use only after graph qualification")
     p.add_argument("--n", type=int, default=4); p.add_argument("--temperature", type=float, default=1.0); p.add_argument("--top-p", type=float, default=0.7)
     p.add_argument("--max-new", type=int, default=8192); p.add_argument("--max-model-len", type=int, default=10240); p.add_argument("--gpu-mem", type=float, default=0.85)
@@ -61,7 +61,7 @@ def main():
     if args.engine_log:
         attach_engine_log(args.engine_log)
     from vllm import LLM, SamplingParams
-    ovr = {"total_ut_steps": args.loops} if args.base else {"total_ut_steps": args.loops, "latent_student": args.student}
+    ovr = {"total_ut_steps": args.loops} if args.base else {"total_ut_steps": args.loops, "latent_student": args.student, **({"latent_window": args.window} if args.window else {})}
     # Full-prompt policy must match the S6 HF reference (scheduler chunked prefill off). vLLM V1 still re-prefills a
     # PREEMPTED request's prompt plus its generated tokens as one chunk; the KV-capacity fields in the summary
     # (kv_fits False = max_num_seqs full-length sequences do not fit) say when that could have happened.
@@ -105,7 +105,7 @@ def main():
             f.flush()
             print(json.dumps({"GEN_PROGRESS": {"done_problems": start + len(batch), "of": len(rows), "elapsed": round(time.time()-t0), "student": args.student}}), flush=True)
     N = len(rows) * args.n
-    summ = {"mode": "base" if args.base else "latent", "backend": args.backend or "auto", "compile_config": args.compile_config, "cudagraph_mode": cudagraph_mode(cc), "chunked_prefill": False, "prompt_chunk_size": 0, "loops": args.loops, "student": args.student, "shard": args.shard, "n_problems": len(rows), "n_samples": args.n, "temperature": args.temperature,
+    summ = {"mode": "base" if args.base else "latent", "backend": args.backend or "auto", "compile_config": args.compile_config, "cudagraph_mode": cudagraph_mode(cc), "chunked_prefill": False, "prompt_chunk_size": 0, "loops": args.loops, "latent_window": args.window, "student": args.student, "shard": args.shard, "n_problems": len(rows), "n_samples": args.n, "temperature": args.temperature,
             "top_p": args.top_p, "avg_at_n": n_ok / N, "pass_at_n": sum(any(v) for v in per_problem.values()) / max(1, len(per_problem)), "mean_tokens": n_tok / N,
             "trunc_rate": n_trunc / N, "seconds": round(dt), "gen_tok_per_s": round(n_tok / dt, 1),
             "wall_seconds": round(time.time()-t0), "seed": args.seed, "max_new": args.max_new, "max_model_len": args.max_model_len,

@@ -87,7 +87,8 @@ def parallel_layer(hidden, previous, first, cos, sin, target, denom, rows, visib
 def parallel_forward(model, student, ids, prompt, history, teacher_logits, targets, *,
                      lam_attn, normalizer, use_checkpoint=False, serving_numerics=False,
                      trajectory=None, teacher_logp=None, opd_loss=None,
-                     detach_history=True, compute_loss=True, input_valid=None, target_denominators=None):
+                     detach_history=True, compute_loss=True, input_valid=None, target_denominators=None,
+                     window_prefix=None):
     """(loss, computed_rows, leaves, parts); ``history[l]`` is [1, prompt+n-1, R] exact C1 rows."""
     n = ids.shape[1] - prompt
     m = n - 1                                   # response inputs: absolute indices prompt .. prompt+n-2
@@ -100,8 +101,11 @@ def parallel_forward(model, student, ids, prompt, history, teacher_logits, targe
     hidden = (serving_replay.embed_serving(model.model.embed_tokens, tokens)
               if serving_numerics else model.model.embed_tokens(tokens))
     cos, sin = model.model.rotary_emb(hidden, positions)
+    # Latent history rows; with the exact window, rows at distance <= W are read exactly instead.
     visible = (torch.arange(prompt + m, device=ids.device)[None]
-               < prompt + torch.arange(m, device=ids.device)[:, None])
+               < prompt + torch.arange(m, device=ids.device)[:, None] - serving_replay.EXACT_WINDOW)
+    if serving_replay.EXACT_WINDOW and (input_valid is not None or not serving_numerics or window_prefix is None):
+        raise ValueError('Exact-window replay supports unpadded serving-numerics replay with a prompt-tail prefix')
     if input_valid is not None:
         visible = visible[None] & input_valid[:, None, :]
     layers = model.model.layers[:model.config.num_hidden_layers]
@@ -130,7 +134,8 @@ def parallel_forward(model, student, ids, prompt, history, teacher_logits, targe
                 target = empty
             if serving_numerics:
                 fn = partial(serving_replay.chunk_layer, layer=layer, sl=sl, loop=loop,
-                             masks=(), history_visible=visible)
+                             masks=(), history_visible=visible,
+                             window_prefix=window_prefix[loop][index] if window_prefix else None)
                 args = (hidden, residual, regs[index], firsts[index], valid, cos, sin, *target, rows[index])
             else:
                 fn = partial(parallel_layer, layer=layer, sl=sl, loop=loop)
@@ -201,6 +206,11 @@ def replay_batch_khop(model, student, trajectory, *, hops, normalizer, teacher_l
         timings['history_collect'] += time.perf_counter() - tick
     else:
         raise ValueError('Unknown K-hop history source')
+    window_prefix = None
+    if serving_replay.EXACT_WINDOW:
+        if history_source != 'rollout':
+            raise ValueError('Exact-window K-hop replay needs rollout-exported (windowed) history rows')
+        window_prefix = serving_replay.prompt_window_kv(model, student, ids[:, :prompt])
     mask = torch.ones(1, 1, dtype=torch.bool, device=ids.device)
     if opd_loss is None:
         first_kl = memory_bounded_fkl(snapshot.first_response_logits, teacher_logits[:, prompt-1:prompt], mask)
@@ -229,7 +239,7 @@ def replay_batch_khop(model, student, trajectory, *, hops, normalizer, teacher_l
         loss, computed, leaves, parts = parallel_forward(model, student, ids, prompt,
             snapshot.rows, teacher_logits, targets, lam_attn=lam_attn, normalizer=normalizer,
             use_checkpoint=checkpointing, serving_numerics=serving_numerics,
-            trajectory=trajectory, teacher_logp=teacher_logp, opd_loss=opd_loss)
+            trajectory=trajectory, teacher_logp=teacher_logp, opd_loss=opd_loss, window_prefix=window_prefix)
         _sync()
         timings['parallel_forward'] += time.perf_counter() - tick
         if not torch.isfinite(loss.detach()):

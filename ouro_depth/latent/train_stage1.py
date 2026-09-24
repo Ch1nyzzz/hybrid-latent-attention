@@ -1,4 +1,5 @@
 """S6 stage-one attention distillation; exact diagonal, terminal latent history."""
+import os
 import torch
 from torch.nn import functional as F
 
@@ -9,7 +10,11 @@ def layer_losses(sl, teacher, layer, *, backward=False, weight=1.0, output_weigh
     regs = sl.write(h)
     packed = sl.pack(regs[-1], sl.write1(h[0]), cos, sin)
     n = h[0].shape[1]
-    diagonal = torch.eye(n, device=h[0].device, dtype=torch.bool)[None, None]
+    # Exact keys: the diagonal (C=1 decode) or, with S6_EXACT_WINDOW=W, the causal band 0 <= i - j <= W that the
+    # exact-window server reads exactly; the latent is supervised only beyond it.
+    window = int(os.environ.get('S6_EXACT_WINDOW', '0') or 0)
+    offset = torch.arange(n, device=h[0].device)[:, None] - torch.arange(n, device=h[0].device)[None]
+    diagonal = ((offset >= 0) & (offset <= window))[None, None]
     bias = teacher.causal_bias(n, h[0].device)
     kls, outs, losses = [], [], []
     for loop in range(sl.loops):
@@ -23,7 +28,7 @@ def layer_losses(sl, teacher, layer, *, backward=False, weight=1.0, output_weigh
         kl = (target_logp.exp() * (target_logp - logp)).sum(-1).mean()
         p = logp.exp().to(value.dtype)
         output = sl.read_out(loop, p.masked_fill(diagonal, 0), packed)
-        output = output + p.diagonal(dim1=-2, dim2=-1)[..., None] * value
+        output = output + (p.masked_fill(~diagonal, 0) @ value if window else p.diagonal(dim1=-2, dim2=-1)[..., None] * value)
         output = teacher.o_proj(layer, output.transpose(1, 2).reshape_as(h[loop]))
         error = (output.float() - target).square().mean(dim=(1, 2))
         energy = target.square().mean(dim=(1, 2)).clamp_min(1e-8)

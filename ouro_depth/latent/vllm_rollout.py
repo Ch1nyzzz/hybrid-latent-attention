@@ -24,13 +24,17 @@ def worker_environment(root, work, device, base_env):
         S6_VLLM_OURO='alias', S6_VLLM_OURO_FILE=str(root/'ouro_depth/vllm_latent/ouro_latent.py'),
         VLLM_CACHE_ROOT=str(work/'cache'), VLLM_USE_FLASHINFER_SAMPLER='0',
         VLLM_LOGGING_LEVEL='INFO', VLLM_WORKER_MULTIPROC_METHOD='spawn',
-        TOKENIZERS_PARALLELISM='false', PYTHONUNBUFFERED='1')
+        TOKENIZERS_PARALLELISM='false', PYTHONUNBUFFERED='1',
+        # Eight engines starting at once raced on random ports (EADDRINUSE killed one rank's engine and hung the
+        # others in NCCL); give each device its own range, clear of MATH500 (18000+) and torchrun (29500).
+        VLLM_PORT=str(40000 + 100 * device))
     return env
 
 
 class VLLMRollout:
     def __init__(self, model_path, work, *, device, batch_size, max_prompt, max_new,
-                 seed, kv_bytes=6*2**30, gpu_memory=.35, timeout=3600, logprobs=0, diagnostic_limit=None, export_cache=False):
+                 seed, kv_bytes=6*2**30, gpu_memory=.35, timeout=3600, logprobs=0, diagnostic_limit=None, export_cache=False,
+                 window=0):
         if device.type != 'cuda':
             raise ValueError('Production OPD generation requires the S6 vLLM CUDA adapter')
         self.work = Path(work)
@@ -43,7 +47,8 @@ class VLLMRollout:
         shutil.copyfile(root/'ouro_depth/vllm_latent/s6_sitecustomize.py', shim/'sitecustomize.py')
         log = self.work/'worker.log'
         config = dict(model=model_path, batch_size=batch_size, max_prompt=max_prompt,
-                      max_new=max_new, seed=seed, kv_bytes=kv_bytes, gpu_memory=gpu_memory, log=str(log), logprobs=logprobs, diagnostic_limit=diagnostic_limit)
+                      max_new=max_new, seed=seed, kv_bytes=kv_bytes, gpu_memory=gpu_memory, log=str(log), logprobs=logprobs, diagnostic_limit=diagnostic_limit,
+                      window=window)
         config_path = self.work/'config.json'; config_path.write_text(json.dumps(config))
         self.log = log.open('a')
         self.process = subprocess.Popen([sys.executable, '-m', 'ouro_depth.vllm_latent.rollout_worker',
@@ -115,3 +120,4 @@ class VLLMRollout:
         # Temporary synchronization weights are not final training exports.
         for name in ('student.pt', 'student.tmp'):
             (self.work/name).unlink(missing_ok=True)
+

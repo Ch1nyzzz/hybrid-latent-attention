@@ -493,7 +493,7 @@ class OuroRotaryEmbedding(nn.Module):
 class OuroModel(OuroPreTrainedModel):
     def __init__(self, config: OuroConfig):
         super().__init__(config)
-        self.padding_idx = config.pad_token_id
+        self.padding_idx = getattr(config, "pad_token_id", None)
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(

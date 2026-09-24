@@ -97,3 +97,62 @@ def test_vonly_relaxed_gate_only_changes_maximum():
     assert GATE['max_kl']==.05
     rows[0]['kl']=.061
     assert not summarize(rows,relaxed)['passed']
+
+
+def test_verify_stage1_qualification_dynamic_steps(monkeypatch):
+    from ouro_depth.trisol import verify_s6_stage1_qualification as v
+    # Check that require raises when steps mismatch
+    with pytest.raises(RuntimeError, match='unexpected step budget'):
+        v.require(1000 == 600, 'unexpected step budget/world: expected steps=600, world=8; got steps=1000, world=8')
+    # Check that require passes when steps match
+    v.require(1000 == 1000, 'unexpected step budget/world')
+
+
+def test_verify_stage1_qualification_cli_args():
+    import os, subprocess, sys
+    res = subprocess.run([sys.executable, 'ouro_depth/trisol/verify_s6_stage1_qualification.py', '--help'],
+                         capture_output=True, text=True, env=dict(os.environ, PYTHONPATH='.'))
+    assert res.returncode == 0
+    assert '--steps STEPS' in res.stdout
+
+
+def _archive(tmp_path, step, rank_k=1024, rank_v=512):
+    import torch
+    from ouro_depth.latent.training_common import SEMANTICS
+    source=tmp_path/'archive';source.mkdir()
+    (source/'complete.json').write_text(json.dumps({'completed_steps':step}))
+    payload=dict(completed_steps=step,semantics=SEMANTICS,metadata={'stage':1,'world':8},
+        cfg={'rank':rank_k,'rank_v':rank_v,'rank1':256},student={'x':torch.ones(2)},
+        optimizer={'state':{0:{'step':step}}},rng_by_rank=[{} for _ in range(8)])
+    torch.save(payload,source/'training.pt')
+    return source
+
+
+def test_resume_from_interval_checkpoint_evaluates_it_then_continues(tmp_path,monkeypatch):
+    import torch
+    source=_archive(tmp_path,200);out=tmp_path/'out';out.mkdir()
+    for k,v in dict(S6_RANK_K='1024',S6_RANK_V='512',S6_RANK1='256',S6_STAGE1_RESUME=str(source),
+                    S6_SERVING_P99_KL='0.5').items():monkeypatch.setenv(k,v)
+    calls=[];evaluations=[];padded=[]
+    def fake_run(argv,**kw):
+        if argv[0]=='bash':
+            step=int(argv[argv.index('--stop-after')+1]);calls.append((step,argv))
+            ck=out/f'checkpoint-{step:06d}';ck.mkdir();(ck/'complete.json').write_text(json.dumps({'completed_steps':step}))
+        if 'ouro_depth.latent.pad_serving_rank' in argv:padded.append(Path(argv[-2]).name)
+    monkeypatch.setattr(driver.subprocess,'run',fake_run)
+    monkeypatch.setattr(driver,'inference_env',lambda *a:{})
+    monkeypatch.setattr(driver,'evaluate',lambda *a:evaluations.append((Path(a[2]).name,Path(a[4]).name)))
+    driver.run(tmp_path/'train',tmp_path/'eval',out)
+    assert padded[0]=='student-200.pt'
+    assert evaluations[0]==('student-200-padded.pt','step-000200')
+    assert [e[1] for e in evaluations]==['step-000200','step-000300','step-000400','step-000500','step-000600']
+    assert [c[0] for c in calls]==[300,400,500,600]
+    assert calls[0][1][calls[0][1].index('--resume')+1]==str(source)
+    assert calls[1][1][calls[1][1].index('--resume')+1]==str(out/'checkpoint-000300')
+    assert torch.load(out/'student-200.pt',weights_only=False)['step']==200
+
+
+def test_resume_rejects_non_interval_checkpoint(tmp_path,monkeypatch):
+    source=_archive(tmp_path,150);out=tmp_path/'out';out.mkdir()
+    monkeypatch.setenv('S6_RANK_K','1024');monkeypatch.setenv('S6_RANK_V','512');monkeypatch.setenv('S6_RANK1','256')
+    with pytest.raises(ValueError,match='interval checkpoint'):driver.prepare_resume_export(source,out)

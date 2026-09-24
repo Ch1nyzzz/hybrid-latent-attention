@@ -1,4 +1,4 @@
-"""Completed S6 Stage1 -> synchronous on-policy distillation (RKL or FKL).
+"""Direct completed S6 Stage1 -> offline C1 Stage3 or synchronous verl-loss OPD.
 
 This is a torchrun S6 trainer using actual verl PG loss functions. It is NOT
 verl's RayPPOTrainer: each rank uses the fused vLLM S6 adapter for generation,
@@ -24,7 +24,7 @@ def parse(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     for name in ('model-path', 'data-dir', 'output-dir'):
         p.add_argument('--' + name, required=True)
-    p.add_argument('--mode', choices=('opd',), required=True)
+    p.add_argument('--mode', choices=('stage3', 'opd'), required=True)
     p.add_argument('--opd-divergence', choices=('rkl','fkl'), default='rkl')
     source = p.add_mutually_exclusive_group(required=True)
     source.add_argument('--stage1-student')
@@ -47,18 +47,28 @@ def parse(argv=None):
                    help='Optional absolute-error diagnostic abort; 0 uses verl PPO-ratio correction and logs drift')
     p.add_argument('--replay-microbatch-size', type=int, default=1)
     p.add_argument('--replay-backend', choices=('auto','reference','serving','fused-backward'), default='auto')
-    p.add_argument('--replay-strategy', choices=('tbptt','khop'), default='tbptt')
+    p.add_argument('--replay-strategy', choices=('tbptt','khop','parallel-iter'), default='tbptt')
+    p.add_argument('--parallel-max-batch-tokens', type=int, default=0)
+    p.add_argument('--parallel-rounds', type=int, default=2)
     p.add_argument('--khop-hops', type=int, default=3)
     p.add_argument('--khop-history-source', choices=('collect','rollout'), default='collect')
+    p.add_argument('--khop-history-backend', choices=('dense','gemm-fp32','gemm-tf32','gemm-bf16'), default='dense',
+                   help='K-hop time-parallel history attention; kept out of resume metadata')
+    p.add_argument('--khop-history-chunk', type=int, default=1024)
+    p.add_argument('--warmup-steps', type=int, default=0, help='Linear LR warmup over the first N updates (all groups)')
+    p.add_argument('--khop-history-max-elements', type=int, default=1 << 27)
+    p.add_argument('--exact-window', type=int, default=0,
+                   help='serve/replay with the last W history rows exact (vLLM latent_window); OPD K-hop rollout replay only')
     p.add_argument('--replay-dtype', choices=('bfloat16','float32'), default='bfloat16')
     p.add_argument('--validation-backend', choices=('c1','external-math500'), default='c1')
     p.add_argument('--max-replay-mean-error', type=float, default=0.)
     p.add_argument('--max-replay-outside-fraction', type=float, default=0.)
     p.add_argument('--no-checkpoint', action='store_true')
     p.add_argument('--prompt-chunk-size', type=int, choices=(0,), default=0,
-                   help='OPD requires full prompt, matching S6 vLLM inference')
+                   help='Both direct paths require full prompt, matching S6 vLLM inference')
     args = p.parse_args(argv)
     if args.replay_microbatch_size < 1:p.error("Replay microbatch must be positive")
+    if args.warmup_steps < 0:p.error("Warmup steps must be nonnegative")
     if min(args.steps, args.global_batch_size, args.tbptt,
            args.max_prompt_length, args.max_response_length, args.save_every,
            args.eval_every, args.eval_records) < 1 or args.stop_after < 0:
@@ -71,6 +81,13 @@ def parse(argv=None):
         p.error('Replay tolerance must be finite and nonnegative')
     if not 0 <= args.max_replay_mean_error < float('inf') or not 0 <= args.max_replay_outside_fraction <= 1:
         p.error('Invalid aggregate replay drift budget')
+    if args.replay_strategy == 'parallel-iter':
+        if args.mode != 'stage3' or args.replay_backend != 'serving':
+            p.error('Parallel iterations require Stage3 and serving backend')
+        if args.parallel_max_batch_tokens < 0:
+            p.error('Parallel batch token budget must be nonnegative')
+        if args.parallel_rounds < 2:
+            p.error('Parallel iterations require M>=2 to train writers')
     if args.replay_strategy == 'khop':
         if args.replay_microbatch_size != 1:
             p.error('K-hop replay requires replay microbatch size 1')
@@ -80,6 +97,9 @@ def parse(argv=None):
             p.error('BF16 and OPD K-hop require serving numerics')
         if args.khop_hops < 0:
             p.error('K-hop hop count must be nonnegative')
+    if args.exact_window and not (args.mode == 'opd' and args.replay_strategy == 'khop' and args.khop_history_source == 'rollout'
+                                  and args.replay_backend == 'serving' and args.validation_backend == 'external-math500'):
+        raise ValueError('The exact window is implemented for OPD K-hop replay of rollout-exported history, serving numerics')
     if args.khop_history_source == 'rollout' and not (args.mode == 'opd' and args.replay_strategy == 'khop'):
         p.error('Rollout history requires OPD K-hop replay')
     if args.opd_divergence == 'fkl' and (args.mode != 'opd' or args.replay_strategy != 'khop'):
@@ -91,6 +111,11 @@ def parse(argv=None):
         if not 0 < args.backbone_lr < 1 or not 0 <= args.backbone_weight_decay < 1:
             p.error('Invalid backbone optimizer settings')
     return args
+
+
+def warmup_factor(step, warmup):
+    """LR multiplier for the update that completes step+1: (step+1)/warmup, then 1."""
+    return min(1., (step + 1) / warmup) if warmup > 0 else 1.
 
 
 def initial_stage1(payload, manifest, expected_stage1_manifest=None):
@@ -119,6 +144,10 @@ def check_replay_drift(drift, count, max_mean=0., max_outside=0.):
 def main(argv=None):
     process_started = time.monotonic()
     args = parse(argv)
+    from .serving_replay import set_history_backend
+    set_history_backend(args.khop_history_backend, args.khop_history_chunk, args.khop_history_max_elements)
+    from .serving_replay import set_exact_window
+    set_exact_window(args.exact_window)
     rank, world, device = setup_runtime(args.seed)
     if args.global_batch_size % world:
         raise ValueError('Global batch must divide world size')
@@ -142,13 +171,15 @@ def main(argv=None):
             raise ValueError('Resume requires a direct-decode checkpoint, not a legacy stage checkpoint')
         metadata = {k: v for k, v in vars(args).items()
                     if k not in ('resume', 'stage1_student', 'output_dir', 'data_dir', 'stop_after', 'expected_stage1_manifest',
-                                 'replay_strategy', 'khop_hops', 'khop_history_source', 'replay_dtype',
+                                 'replay_strategy', 'khop_hops', 'khop_history_source', 'replay_dtype', 'parallel_rounds', 'parallel_max_batch_tokens',
                                  'validation_backend', 'max_replay_mean_error', 'max_replay_outside_fraction', 'opd_divergence',
-                                 'train_backbone', 'backbone_lr', 'backbone_weight_decay')}
+                                 'train_backbone', 'backbone_lr', 'backbone_weight_decay', 'khop_history_backend',
+                                 'khop_history_chunk', 'khop_history_max_elements', 'warmup_steps', 'exact_window')}
         metadata.update(world=world, data_manifest_sha256=manifest,
             recipe='s6-direct-decode-v1', sampling='complete-openr1-prompts-v1',
             response_boundary='include-first-and-eos', optimizer='adamw', betas=(.9, .999),
-            schedule='constant', gradient_reduction='sum-global-token-normalized',
+            schedule=f'linear-warmup-{args.warmup_steps}-then-constant' if args.warmup_steps else 'constant',
+            gradient_reduction='sum-global-token-normalized',
             temperature=1., top_p=1., rollout_n=1, ppo_epochs=1,
             update_minibatch=args.global_batch_size, replay_microbatch=args.replay_microbatch_size,
             stage1_origin=(payload['metadata']['stage1_origin'] if args.resume else str(source.resolve())))
@@ -157,10 +188,18 @@ def main(argv=None):
         if args.replay_strategy == 'khop':
             metadata.update(replay_strategy='khop', khop_hops=args.khop_hops,
                             khop_history_source=args.khop_history_source, replay_dtype=args.replay_dtype)
-        if args.replay_dtype != 'bfloat16':
+        elif args.replay_strategy == 'parallel-iter':
+            metadata.update(replay_strategy='parallel-iter', parallel_rounds=args.parallel_rounds,
+                parallel_max_batch_tokens=args.parallel_max_batch_tokens,
+                replay_dtype=args.replay_dtype, parallel_initialization='detached-full-prefill-v1',
+                parallel_backward='full-unroll-no-detach', parallel_rounds_include_loss_pass=True,
+                parallel_aux_denominator='valid-response-boundary-inclusive')
+        elif args.replay_dtype != 'bfloat16':
             metadata['replay_dtype'] = args.replay_dtype
         if args.validation_backend != 'c1':
             metadata['validation_backend'] = args.validation_backend
+        if args.exact_window:  # absent at W=0, so window-free metadata stays identical to the legacy recipe
+            metadata['exact_window'] = args.exact_window
         if args.max_replay_mean_error or args.max_replay_outside_fraction:
             metadata.update(max_replay_mean_error=args.max_replay_mean_error,
                             max_replay_outside_fraction=args.max_replay_outside_fraction)
@@ -213,7 +252,7 @@ def main(argv=None):
             raise ValueError('The teacher model must declare EOS token IDs')
         metadata['eos_ids'] = sorted(eos_ids)
         completed = restore_checkpoint(source, student, optimizer, metadata, rank, backbone=model if args.train_backbone else None) if args.resume else 0
-        emit('ready', metadata=metadata, completed_steps=completed,
+        emit('ready', metadata=metadata, completed_steps=completed, khop_history_backend=args.khop_history_backend,
              prompt_count=len(corpus.offsets), gpu_count=world if device.type == 'cuda' else 0)
 
         def validate(step):
@@ -239,12 +278,13 @@ def main(argv=None):
                 capture.remove_hooks()
 
         validate(completed)
-        from .vllm_rollout import VLLMRollout
-        generator = VLLMRollout(args.model_path, output/f'rollout-rank-{rank}', device=device,
-            batch_size=args.global_batch_size//world, max_prompt=args.max_prompt_length,
-            max_new=args.max_response_length, seed=args.seed+rank,
-            kv_bytes=int(args.rollout_kv_gib*2**30), gpu_memory=args.rollout_gpu_memory,
-            export_cache=args.khop_history_source == 'rollout')
+        if args.mode == 'opd':
+            from .vllm_rollout import VLLMRollout
+            generator = VLLMRollout(args.model_path, output/f'rollout-rank-{rank}', device=device,
+                batch_size=args.global_batch_size//world, max_prompt=args.max_prompt_length,
+                max_new=args.max_response_length, seed=args.seed+rank,
+                kv_bytes=int(args.rollout_kv_gib*2**30), gpu_memory=args.rollout_gpu_memory,
+                export_cache=args.khop_history_source == 'rollout', window=args.exact_window)
         end = min(args.steps, args.stop_after or args.steps)
         for step in range(completed, end):
             if distributed():
@@ -257,14 +297,18 @@ def main(argv=None):
                     for i in range(rank, args.global_batch_size, world)]
             trajectories = []
             with amp(device, autocast_dtype):
-                prompts = [torch.tensor(r['prompt_ids'], device=device)[None] for r in rows]
-                emit('rollout_start', rollout_version=step, local_prompts=len(prompts),
-                     backend='vllm-s6-full-decode-only')
-                sync_kwargs = {'backbone': model} if args.train_backbone else {}
-                trajectories = generator.generate(student, prompts, eos_ids=eos_ids, version=step,
-                                                  **sync_kwargs)
-                emit('rollout_complete', rollout_version=step,
-                     local_tokens=sum(t.response_length for t in trajectories))
+                if args.mode == 'opd':
+                    prompts = [torch.tensor(r['prompt_ids'], device=device)[None] for r in rows]
+                    emit('rollout_start', rollout_version=step, local_prompts=len(prompts),
+                         backend='vllm-s6-full-decode-only')
+                    sync_kwargs = {'backbone': model} if args.train_backbone else {}
+                    trajectories = generator.generate(student, prompts, eos_ids=eos_ids, version=step,
+                                                      **sync_kwargs)
+                    emit('rollout_complete', rollout_version=step,
+                         local_tokens=sum(t.response_length for t in trajectories))
+                else:
+                    trajectories = [Trajectory(torch.tensor(r['input_ids'], device=device)[None],
+                                               r['prompt_len'], step) for r in rows]
             rollout_seconds = elapsed(started, device)
             count = torch.tensor(sum(t.response_length for t in trajectories), device=device, dtype=torch.float64)
             reduce_sum(count)
@@ -274,24 +318,50 @@ def main(argv=None):
             from .batched_decode import groups, replay_batch
             from .khop_replay import replay_batch_khop
             batches = groups(trajectories, args.replay_microbatch_size) if args.replay_microbatch_size > 1 else [[t] for t in trajectories]
+            if args.replay_strategy == 'parallel-iter':
+                from .parallel_iterations import iteration_groups
+                batches = iteration_groups(trajectories,args.replay_microbatch_size,
+                                           args.parallel_max_batch_tokens)
             for group_index, group in enumerate(batches):
                 if any(t.version != step for t in group):
                     raise ValueError('Stale rollout: sampling/replay versions differ')
                 logits_list, targets_list, logp_list = [], [], []
                 tick = time.monotonic()
                 with amp(device, autocast_dtype):
-                    for trajectory in group:
+                    for trajectory in ([] if args.replay_strategy == 'parallel-iter' else group):
                         if args.mode == 'opd' and args.opd_divergence == 'fkl':
                             with torch.no_grad():
                                 _, states, _ = teacher.model.model(input_ids=trajectory.ids[:, :-1], use_cache=False)
                                 logits_list.append(teacher.model.lm_head(states[-1]).detach())
                                 del states
-                        else:
+                        elif args.mode == 'opd':
                             logp_list.append(score_teacher(teacher.model, trajectory))
+                        else:
+                            capture = Teacher.wrap(teacher.model)
+                            try:
+                                lp, target = TeacherTargets(capture)(trajectory.ids[:, :-1])
+                                logits_list.append(lp); targets_list.append(target)
+                                del lp, target
+                            finally:
+                                capture.remove_hooks()
+                    if args.replay_strategy == 'parallel-iter':
+                        from .batched_recipe import prepare_batch
+                        capture = Teacher.wrap(teacher.model)
+                        try:
+                            batch = prepare_batch([(t.ids,t.prompt) for t in group],
+                                TeacherTargets(capture),3,include_first_denominator=True)
+                        finally:
+                            capture.remove_hooks()
                     if device.type == 'cuda':torch.cuda.synchronize()
                     teacher_seconds += time.monotonic()-tick
                     tick = time.monotonic()
-                    if args.replay_strategy == 'khop':
+                    if args.replay_strategy == 'parallel-iter':
+                        from .parallel_iterations import backward_iteration_batch
+                        result = backward_iteration_batch(model,student,batch,rounds=args.parallel_rounds,
+                            normalizer=float(count),lam_attn=args.stage3_aux_weight,
+                            checkpointing=not args.no_checkpoint)
+                        del batch
+                    elif args.replay_strategy == 'khop':
                         result = replay_batch_khop(model, student, group[0], hops=args.khop_hops,
                             normalizer=float(count), teacher_logits=logits_list[0] if logits_list else None, targets=targets_list[0] if targets_list else None,
                             teacher_logp=logp_list[0] if logp_list else None, opd_loss=opd_loss, serving_numerics=serving,
@@ -335,6 +405,8 @@ def main(argv=None):
                 norm = synchronize_gradients(student)
             if norm == 0:
                 raise RuntimeError('No student gradient in this global batch; no update was applied')
+            for group in optimizer.param_groups:  # stateless in step; initial_lr is checkpointed with the optimizer
+                group['lr'] = group.setdefault('initial_lr', group['lr']) * warmup_factor(step, args.warmup_steps)
             if args.train_backbone:
                 from .training_common import optimizer_step_with_deltas
                 group_metrics['parameter_delta_norms'] = optimizer_step_with_deltas(optimizer)
@@ -346,8 +418,9 @@ def main(argv=None):
             seconds = elapsed(started, device)
             progress['supervised_tokens'] += int(count)
             progress['update_gpu_hours'] += seconds * (world if device.type == 'cuda' else 0) / 3600
-            emit('update', completed_steps=step+1, stage='opd',
-                rollout_version=step, objective=float(objective_tensor), grad_norm=norm, lr=args.lr, **group_metrics,
+            emit('update', completed_steps=step+1, stage=3 if args.mode == 'stage3' else 'opd',
+                rollout_version=step, objective=float(objective_tensor), grad_norm=norm,
+                lr=optimizer.param_groups[-1]['lr'], **group_metrics,
                 global_batch=args.global_batch_size, replay_microbatch=args.replay_microbatch_size,
                 supervised_positions=int(count), **progress, seconds=seconds,
                 rollout_seconds=rollout_seconds, teacher_seconds_local=teacher_seconds,
@@ -360,7 +433,7 @@ def main(argv=None):
             del trajectories
             if (step+1) % args.eval_every == 0 or step+1 == end:
                 validate(step+1)
-            if (step+1) % args.save_every == 0 or step+1 == end:
+            if (step+1) % args.save_every == 0 or step+1 == end or (args.replay_strategy == 'parallel-iter' and step == 0 and args.validation_backend == 'c1'):
                 atomic_checkpoint(output, student, optimizer, step+1, metadata, progress=progress,
                                   backbone=model if args.train_backbone else None)
         total_seconds = elapsed(process_started, device)

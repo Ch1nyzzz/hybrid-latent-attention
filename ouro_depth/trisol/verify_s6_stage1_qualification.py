@@ -1,5 +1,5 @@
 """Fail closed before formal continuation; also check stateless sample replay."""
-import argparse,json,math
+import argparse,json,math,os
 from pathlib import Path
 from ouro_depth.latent.corpus_index import RecordIndex
 
@@ -8,7 +8,7 @@ def require(condition,message):
     if not condition:raise RuntimeError('Stage1 qualification: '+message)
 
 
-def verify(output,data,world=8,rank_k=512,rank_v=512,rank1=256):
+def verify(output,data,world=8,rank_k=512,rank_v=512,rank1=256,steps=600):
     output=Path(output);corpus=RecordIndex(Path(data)/'train.jsonl')
     for step in (2,8):
         equality=json.loads((output/f'qualification-ranks-{step}.json').read_text())
@@ -22,12 +22,13 @@ def verify(output,data,world=8,rank_k=512,rank_v=512,rank1=256):
         qualification=[r for r in rows if r['event']=='qualification_update']
         require(len(qualification)==8, 'len(qualification)==8')
         for r in qualification:
-            require(set(r['groups'])=={'cand_s','cand1','q_absorb','out_absorb','q_absorb1','out_absorb1'}, "set(r['groups'])=={'cand_s','cand1','q_absorb','out_absorb','q_absorb1','out_absorb1'}")
+            expected = {'cand_s','cand1','inter_s','q_absorb','out_absorb','q_absorb1','out_absorb1'} if 'inter_s' in r['groups'] else {'cand_s','cand1','q_absorb','out_absorb','q_absorb1','out_absorb1'}
+            require(set(r['groups'])==expected, f"unexpected parameter groups: {set(r['groups'])} != {expected}")
             require(all(v['min_grad']>0 and v['min_update']>0 for v in r['groups'].values()), "all(v['min_grad']>0 and v['min_update']>0 for v in r['groups'].values())")
         ready=[r for r in rows if r['event']=='ready']
         meta=ready[0]['metadata']
         require(ready[1]['metadata']==meta,'resume metadata changed')
-        require(meta['steps']==600 and meta['world']==world,'unexpected step budget/world')
+        require(meta['steps']==steps and meta['world']==world,f"unexpected step budget/world: expected steps={steps}, world={world}; got steps={meta['steps']}, world={meta['world']}")
         require(meta['loops']==4 and meta['rank']==rank_k and meta['rank_v']==rank_v and meta['rank1']==rank1,'unexpected S6 geometry')
         for r in updates:
             require(all(math.isfinite(r[key]) for key in ('objective','grad_norm','seconds','peak_allocated_gib')), "all(math.isfinite(r[key]) for key in ('objective','grad_norm','seconds','peak_allocated_gib'))")
@@ -45,4 +46,5 @@ if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('output');p.add_argument('--data-dir',required=True)
     p.add_argument('--rank',type=int,default=512);p.add_argument('--rank-v',type=int,default=512)
     p.add_argument('--rank1',type=int,default=256)
-    args=p.parse_args();verify(args.output,args.data_dir,rank_k=args.rank,rank_v=args.rank_v,rank1=args.rank1)
+    p.add_argument('--steps',type=int,default=int(os.environ.get('S6_TOTAL_STEPS','600')))
+    args=p.parse_args();verify(args.output,args.data_dir,rank_k=args.rank,rank_v=args.rank_v,rank1=args.rank1,steps=args.steps)

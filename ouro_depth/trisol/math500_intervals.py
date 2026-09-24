@@ -50,8 +50,15 @@ def aggregate(directory, rows, *, shards=8, samples=1, max_new=8192):
         s=json.loads((directory/f'summary{shard}.json').read_text())
         if (s['shard']!=shard or s['nshards']!=shards or s['n_samples']!=samples
             or s['max_new']!=max_new or s['backend']!='TRITON_ATTN'
-            or s['cudagraph_mode']!='FULL_DECODE_ONLY' or s.get('kv_fits') is not True):
+            or s['cudagraph_mode']!='FULL_DECODE_ONLY'
+            or (s.get('kv_fits') is not True and not s.get('latent_window'))):
             raise ValueError('MATH500 protocol or KV capacity mismatch')
+        if s.get('latent_window'):
+            # The startup pool estimate budgets sliding-window layers at full length (kv_fits is meaningless);
+            # the scheduler marker proves that no request was preempted and re-prefilled.
+            logs=sorted((directory/f'worker-{shard}').glob('engine-attempt-*.log'))
+            if not logs or any('S6_PREEMPT' in l.read_text(errors='replace') for l in logs):
+                raise ValueError('Exact-window MATH500 shard was preempted or lacks its engine log')
         records=[json.loads(l) for l in (directory/f'shard{shard}.jsonl').read_text().splitlines()]
         expected_shard={(r['id'],i) for r in rows[shard::shards] for i in range(samples)}
         found={(r['id'],r['sample']) for r in records}
@@ -79,7 +86,10 @@ def evaluate(root, model, student, data, output, *, smoke=False):
     max_new=16 if smoke else 8192
     protocol=dict(student=str(Path(student).resolve()),data_sha256=hashlib.sha256(Path(data).read_bytes()).hexdigest(),
         model=model,shards=8,n=1,temperature=1.,top_p=.7,seed=20260915,max_new=max_new,
-        max_model_len=10240,backend='TRITON_ATTN',cudagraph='FULL_DECODE_ONLY',smoke=smoke)
+        max_model_len=10240,backend='TRITON_ATTN',cudagraph='FULL_DECODE_ONLY',smoke=smoke,
+        latent_window=int(os.environ.get('S6_EXACT_WINDOW','0') or 0),max_num_seqs=int(os.environ.get('S6_MATH_SEQS','64')),
+        gpu=subprocess.run(['nvidia-smi','--query-gpu=name','--format=csv,noheader','-i','0'],
+                           capture_output=True,text=True).stdout.strip())
     protocol_path=output/'protocol.json'
     if protocol_path.exists() and json.loads(protocol_path.read_text())!=protocol:
         raise ValueError('Refusing to mix evaluation protocols')
@@ -91,8 +101,11 @@ def evaluate(root, model, student, data, output, *, smoke=False):
             '--student',str(student),'--data',data,'--output',str(output),
             '--shard',str(gpu),'--nshards','8','--n','1','--temperature','1','--top-p','.7',
             '--max-new',str(max_new),'--max-model-len','10240','--seed','20260915',
-            '--max-num-seqs','64','--auto-concurrency','--backend','TRITON_ATTN',
+            '--max-num-seqs',str(protocol['max_num_seqs']),'--auto-concurrency','--backend','TRITON_ATTN',
             '--compile-config',FDO,'--engine-log',str(work/'engine.log')]
+        if protocol['latent_window']:
+            # the startup KV estimate budgets sliding-window layers at full length: fixed concurrency, no auto
+            argv.remove('--auto-concurrency');argv+=['--window',str(protocol['latent_window'])]
         if smoke:argv+=['--limit','8']
         run_inference_shard(argv,root,work,gpu)
     start=time.monotonic()

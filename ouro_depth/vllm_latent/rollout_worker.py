@@ -174,7 +174,8 @@ def main():
                 # rows for a P+n-1 trajectory. The exporter requires synchronous steps.
                 llm = LLM(model=config['model'], trust_remote_code=True, dtype='bfloat16',
                     worker_extension_cls='ouro_depth.vllm_latent.rollout_worker.S6RolloutWorkerExtension',
-                    hf_overrides={'latent_student': request['weights']},
+                    hf_overrides={'latent_student': request['weights'],
+                                  **({'latent_window': config['window']} if config.get('window') else {})},
                     attention_backend='TRITON_ATTN', enable_prefix_caching=False,
                     enable_chunked_prefill=False, async_scheduling=False, generation_config='vllm',
                     max_model_len=config['max_prompt']+config['max_new'],
@@ -186,6 +187,18 @@ def main():
                 sys.stdout.flush(); sys.stderr.flush()
                 pool = parse_engine_log(Path(config['log']).read_text(errors='replace'))['kv_cache_tokens']
                 capacity = kv_capacity(pool, config['batch_size'], config['max_prompt']+config['max_new'])
+                if config.get('window'):
+                    # vLLM's startup pool estimate budgets the sliding-window exact layers at full length; bound the
+                    # real need instead (latent rows at full length + the window pages + one full exact prompt in
+                    # flight). The exporter still refuses any preempted request at runtime.
+                    import torch
+                    body = json.loads((Path(config['model'])/'config.json').read_text())
+                    cfg = torch.load(request['weights'], map_location='cpu', weights_only=False)['cfg']
+                    latent = 2 * body['num_hidden_layers'] * (cfg['rank'] + cfg['rank_v'] + 2 * cfg['rank1'])
+                    exact = 2 * body['num_hidden_layers'] * cfg['loops'] * 2 * body['hidden_size']
+                    need = config['batch_size'] * ((config['max_prompt']+config['max_new']) * latent
+                                                    + (config['window'] + 48) * exact) + config['max_prompt'] * exact
+                    capacity = dict(capacity, kv_fits=need <= config['kv_bytes'], window_need_bytes=need)
                 if not capacity['kv_fits']:
                     raise RuntimeError('Insufficient KV capacity: preemption would change S6 semantics: '+str(capacity))
             entry = 'update_s6_backbone' if request.get('full_parameter') else 'update_s6_student'

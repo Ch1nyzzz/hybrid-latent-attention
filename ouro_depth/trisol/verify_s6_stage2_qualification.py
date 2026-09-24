@@ -35,7 +35,7 @@ def verify(output, data, world=8, *, chunk_sizes=(32,64,128,256), micro_batch=2,
         checks=[r for r in rows if r['event']=='qualification_update']
         require(len(checks)==end_step, 'Missing per-parameter update checks')
         for row in checks:
-            require(set(row['groups'])=={'cand_s','cand1','q_absorb','out_absorb','q_absorb1','out_absorb1'}, "set(row['groups'])=={'cand_s','cand1','q_absorb','out_absorb','q_absorb1','out_absorb1'}")
+            require(set(row['groups'])=={'cand_s','cand1','inter_s','q_absorb','out_absorb','q_absorb1','out_absorb1'}, "set(row['groups'])=={'cand_s','cand1','inter_s','q_absorb','out_absorb','q_absorb1','out_absorb1'}")
             require(all(v['min_grad']>0 and v['min_update']>0 for v in row['groups'].values()), "all(v['min_grad']>0 and v['min_update']>0 for v in row['groups'].values())")
         for row in updates:
             require(row['stage']==2 and row['global_batch']==128 and row['micro_batch']==micro_batch, 'Batch/stage mismatch')

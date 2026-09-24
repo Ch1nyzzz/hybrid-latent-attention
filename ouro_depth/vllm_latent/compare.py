@@ -5,7 +5,7 @@ the decode rate is the N full-concurrency steps between the N and 2N runs, only 
 whole batch in whole blocks and the admission ramp-up ends inside the N-token run). Runs inside the vLLM image."""
 from __future__ import annotations
 
-import argparse, json, sys, time
+import argparse, json, os, sys, time
 from pathlib import Path
 
 import torch
@@ -82,6 +82,8 @@ def main():
     from vllm import LLM, SamplingParams
     Path(args.out).mkdir(parents=True, exist_ok=True)
     ovr = {"total_ut_steps": args.loops, **({"lla_codec": args.lla_codec, "lla_rank": args.lla_rank} if lla else {} if args.base else {"latent_student": args.student})}
+    if os.environ.get("S6_EXACT_WINDOW") and not (lla or args.base):
+        ovr["latent_window"] = int(os.environ["S6_EXACT_WINDOW"])
     max_batched = max(8192, args.max_model_len)
     assert max_batched >= args.max_model_len, "full-prompt prefill needs max_num_batched_tokens >= max_model_len"
     llm = LLM(model=args.model, hf_overrides=ovr, trust_remote_code=True, dtype="bfloat16", **cc, enable_prefix_caching=False, enable_chunked_prefill=False, max_model_len=args.max_model_len,

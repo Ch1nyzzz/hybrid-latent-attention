@@ -17,10 +17,13 @@ class SharedDecodeCache(UniversalTransformerCache):
     def __init__(self, num_layers: int, total_ut_steps: int, prefix_len: int | None = None, recent: int = 0,
                  mode: str = "mixed"):
         """mode='mixed': prompt from own loop, older generated tokens from the final loop (block-aligned).
-        mode='all_final': every previous token (prompt included) from the final loop; only self from own loop."""
+        mode='all_final': every previous token (prompt included) from the final loop; only self from own loop.
+        mode='mean': every previous token (prompt included) averaged across all T loops; only self from own loop."""
         super().__init__(max_cache_size=num_layers * total_ut_steps)
         self.L, self.T, self.prefix_len, self.recent, self.mode = num_layers, total_ut_steps, prefix_len, recent, mode
         self._prompt_len = None
+        self._mean_key_cache = [None] * num_layers
+        self._mean_value_cache = [None] * num_layers
 
     def update(self, key_states, value_states, layer_idx, cache_kwargs=None):
         ut, l = divmod(layer_idx, self.L)
@@ -29,9 +32,38 @@ class SharedDecodeCache(UniversalTransformerCache):
         if prefill:
             self._prompt_len = k.shape[2]
             return k, v
+
+        n = k.shape[2] - 1  # position of the current token
+
+        if self.mode == "mean":
+            if self._mean_key_cache[l] is None:
+                self._mean_key_cache[l] = torch.stack(
+                    [self.key_cache[u * self.L + l][:, :, :self._prompt_len] for u in range(self.T)]
+                ).mean(dim=0)
+                self._mean_value_cache[l] = torch.stack(
+                    [self.value_cache[u * self.L + l][:, :, :self._prompt_len] for u in range(self.T)]
+                ).mean(dim=0)
+
+            mk = self._mean_key_cache[l]
+            mv = self._mean_value_cache[l]
+            ret_k = torch.cat([mk, k[:, :, n:]], dim=2)
+            ret_v = torch.cat([mv, v[:, :, n:]], dim=2)
+
+            if ut == self.T - 1:
+                mean_k_n = torch.stack(
+                    [self.key_cache[u * self.L + l][:, :, n:] for u in range(self.T)]
+                ).mean(dim=0)
+                mean_v_n = torch.stack(
+                    [self.value_cache[u * self.L + l][:, :, n:] for u in range(self.T)]
+                ).mean(dim=0)
+                self._mean_key_cache[l] = torch.cat([mk, mean_k_n], dim=2)
+                self._mean_value_cache[l] = torch.cat([mv, mean_v_n], dim=2)
+
+            return ret_k, ret_v
+
         if ut == self.T - 1:
             return k, v
-        n = k.shape[2] - 1  # position of the current token
+
         fslot = (self.T - 1) * self.L + l
         if self.mode == "all_final":
             fk, fv = self.key_cache[fslot], self.value_cache[fslot]  # positions [0, n)

@@ -13,7 +13,7 @@ def test_full_parameter_interval_configuration():
     assert args.max_replay_mean_error == .03 and args.max_replay_outside_fraction == .01
 
 
-@pytest.mark.parametrize('mode',['opd'])
+@pytest.mark.parametrize('mode',['stage3','opd'])
 def test_interval_configuration(mode):
     argv=training_args(mode,'model','data',Path('/out/train'),'stage1',10)
     args=parse(argv[argv.index('ouro_depth.latent.train_decode')+1:])
@@ -23,7 +23,8 @@ def test_interval_configuration(mode):
     resumed=training_args(mode,'model','data',Path('/out/train'),'stage1',20,Path('/out/train/checkpoint-000010'))
     b=parse(resumed[resumed.index('ouro_depth.latent.train_decode')+1:])
     assert b.resume.endswith('checkpoint-000010') and b.stop_after==20
-    assert args.khop_hops==3 and args.khop_history_source=='rollout' and args.max_replay_mean_error==.03
+    if mode=='stage3':assert args.parallel_rounds==2 and args.replay_strategy=='parallel-iter'
+    else:assert args.khop_hops==3 and args.khop_history_source=='rollout' and args.max_replay_mean_error==.03
 
 
 def test_aggregate_and_incomplete_rejection(tmp_path):
@@ -59,13 +60,11 @@ def test_external_validation_preserves_resume(tmp_path,monkeypatch):
         return capture
     monkeypatch.setattr(Teacher,'wrap',classmethod(scoped_wrap))
     monkeypatch.setattr('ouro_depth.latent.teacher.load_teacher',lambda *a,**k:deepcopy(model))
-    from ouro_depth.tests.test_s6_direct_decode import reference_worker
-    monkeypatch.setattr('ouro_depth.latent.vllm_rollout.VLLMRollout',reference_worker(model))
-    common=['--mode','opd','--model-path','tiny','--data-dir',str(data),'--steps','2',
+    common=['--mode','stage3','--model-path','tiny','--data-dir',str(data),'--steps','2',
         '--global-batch-size','2','--max-prompt-length','8','--max-response-length','5',
         '--save-every','1','--eval-every','1','--validation-backend','external-math500',
-        '--opd-divergence','fkl','--replay-strategy','khop',
-        '--replay-backend','serving','--replay-microbatch-size','1']
+        '--replay-strategy','parallel-iter','--parallel-rounds','2',
+        '--replay-backend','serving','--replay-microbatch-size','2']
     full,partial=tmp_path/'full',tmp_path/'partial'
     trainer.main(common+['--stage1-student',str(stage1),'--output-dir',str(full)])
     trainer.main(common+['--stage1-student',str(stage1),'--output-dir',str(partial),'--stop-after','1'])
@@ -82,8 +81,6 @@ def test_driver_evaluates_every_checkpoint_before_next_interval(tmp_path,monkeyp
     from ouro_depth.trisol import run_decode_math_intervals as driver
     calls=[]
     def train(argv,check):
-        assert argv[argv.index('--opd-divergence')+1] == 'rkl'
-        assert float(argv[argv.index('--lr')+1]) == 1e-5
         target=int(argv[argv.index('--stop-after')+1]);calls.append(('train',target))
         if target>10:assert argv[argv.index('--resume')+1].endswith(f'checkpoint-{target-10:06d}')
         path=tmp_path/'train'/f'checkpoint-{target:06d}';path.mkdir(parents=True)
@@ -94,7 +91,7 @@ def test_driver_evaluates_every_checkpoint_before_next_interval(tmp_path,monkeyp
     monkeypatch.setattr(driver.subprocess,'run',train)
     monkeypatch.setattr(driver,'evaluate',evaluate)
     monkeypatch.delenv('TRISOL_RESUME',raising=False)
-    monkeypatch.setattr(sys,'argv',['driver','--mode','opd','--opd-divergence','rkl','--lr','1e-5','--model','model','--data','data',
+    monkeypatch.setattr(sys,'argv',['driver','--mode','stage3','--model','model','--data','data',
         '--math-data','math','--student','stage1','--output',str(tmp_path)])
     driver.main()
     assert calls==[('smoke',0)]+[event for n in range(10,201,10) for event in [('train',n),('eval',n)]]

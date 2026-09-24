@@ -13,6 +13,7 @@ non-default RoPE. ``Attention.forward`` is never called, so its head-128 unified
 workspace is allocated but unused. Registered via ``ModelRegistry.register_model`` (absolute imports).
 """
 import json
+import os
 from collections.abc import Iterable
 
 import torch
@@ -34,7 +35,7 @@ from vllm.model_executor.models.utils import (AutoWeightsLoader, WeightsMapper, 
                                               make_empty_intermediate_tensors_factory, make_layers, maybe_prefix)
 from vllm.v1.attention.backend import AttentionType
 
-from ouro_depth.latent.register import LatentLayer
+from ouro_depth.latent.register import LatentLayer, normalize_cfg
 from ouro_depth.vllm_latent import s6_layer, s6_ops
 from ouro_depth.vllm_latent.backbone_sync import apply_backbone_update, package_backbone
 from ouro_depth.vllm_latent.geometry import rope_theta, validate_geometry
@@ -78,7 +79,9 @@ class OuroLatentAttention(nn.Module):
                                           quant_config=quant_config, prefix=f'{prefix}.qkv_proj')
         self.o_proj = RowParallelLinear(hidden_size, hidden_size, bias=False, quant_config=quant_config, prefix=f'{prefix}.o_proj')
         self.rotary_emb = get_rope(self.head_dim, max_position=max_position, rope_parameters=config.rope_parameters)
-        self.latent = LatentLayer(hidden_size, num_heads, self.head_dim, loops, rank, rank_v, rank1)
+        self.latent = LatentLayer(hidden_size, num_heads, self.head_dim, loops, rank, rank_v, rank1,
+                                  gated=bool(latent_cfg['gated']), bottleneck=int(latent_cfg['bottleneck']),
+                                  legacy=bool(latent_cfg['legacy']))
         index = extract_layer_index(prefix)
         second = prefix.replace(f'layers.{index}', f'layers.{config.num_hidden_layers + index}')  # one integer per name
         scale = self.head_dim ** -0.5
@@ -86,7 +89,17 @@ class OuroLatentAttention(nn.Module):
                                    attn_type=attn_type, prefix=f'{prefix}.attn')
         self.attn_l1 = Attention(num_heads, rank1, scale, num_kv_heads=1, cache_config=cache_config,
                                  attn_type=attn_type, prefix=f'{second}.attn')
-        for attn in (self.attn_main, self.attn_l1):
+        # Exact window: one exact (roped K, V) cache per loop, read only at history rows [ctx - W, ctx). Declared as a
+        # sliding window of W + 1 (vLLM keeps rows >= ctx - window + 1), so the KV manager frees every page that has
+        # left the window: the per-request footprint is O(W) pages, not O(length).
+        self.window = int(getattr(config, 'latent_window', 0) or 0)
+        self.attn_exact = nn.ModuleList(
+            Attention(num_heads, self.head_dim, scale, num_kv_heads=num_heads, cache_config=cache_config, attn_type=attn_type,
+                      per_layer_sliding_window=(None if os.environ.get('S6_WINDOW_FULL') else
+                                                self.window + 1 + int(os.environ.get('S6_WINDOW_MARGIN', '0'))),
+                      prefix=prefix.replace(f'layers.{index}', f'layers.{(2 + t) * config.num_hidden_layers + index}') + '.attn')
+            for t in range(loops)) if self.window else nn.ModuleList()
+        for attn in (self.attn_main, self.attn_l1, *self.attn_exact):
             if attn.impl.__class__.__name__ != 'TritonAttentionImpl':
                 raise ValueError('Select TRITON_ATTN for the S6 paged latent cache')
             if attn.impl.kv_cache_dtype not in ('auto', 'float16', 'bfloat16'):
@@ -104,8 +117,15 @@ class OuroLatentAttention(nn.Module):
         md, _, cache, _ = get_attention_context(attn.layer_name)
         paged = md is not None and cache.numel() > 0  # profiling: no metadata, 1-D placeholder cache
         q, k, v = (x.reshape(T, self.num_heads, self.head_dim) for x in (q, k, v))
+        window = None
+        if self.window:
+            exact = self.attn_exact[current_ut]
+            md_e, _, cache_e, _ = get_attention_context(exact.layer_name)
+            if md_e is not None and cache_e.numel() > 0:
+                unified_kv_cache_update(k, v, exact.layer_name)   # the window reads only rows before this chunk
+                window = (cache_e, md_e.block_table)
         out = s6_layer.attend(sl, current_ut, q_lat, q, k, v, cache if paged else None, md.block_table if paged else None,
-                              attn._k_scale, attn._v_scale, ctx)
+                              attn._k_scale, attn._v_scale, ctx, window)
         row = s6_layer.committed_row(sl, current_ut, state, ctx)
         if paged and row is not None:  # all T rows: the reshape kernel's grid is the padded slot mapping
             unified_kv_cache_update(row[0][:, None], row[1][:, None], attn.layer_name)
@@ -148,7 +168,7 @@ class OuroModel(nn.Module):
         if not student_path:
             raise ValueError("set hf_overrides={'latent_student': path}")
         ck = torch.load(student_path, map_location='cpu', weights_only=False)
-        self.latent_cfg, self._student_state = ck['cfg'], ck['student']
+        self.latent_cfg, self._student_state = normalize_cfg(ck['cfg'], ck['student']), ck['student']
         self._pending_backbone = package_backbone(ck)
         validate_geometry(config, self.latent_cfg)
         # Per-layer strict loading (load_latent_student) rejects missing/extra keys inside each layer; only keys
@@ -196,7 +216,7 @@ class OuroModel(nn.Module):
         print('S6_RUNTIME_CHECK ' + json.dumps({'init': {'rope_theta': theta, 'rope_parameters': dict(config.rope_parameters),
               'latent_rope': {'flat': self.rope_flat, 'exact': rope_exact, 'table_rows': config.max_position_embeddings},
               'split_max_tokens': self.split_max_tokens, 'splits_max': self.splits_max, 'sm_count': self.sm_count,
-              'workspace_floats': self.workspace.floats, 'max_model_len': vllm_config.model_config.max_model_len,
+              'workspace_floats': self.workspace.floats, 'latent_window': int(getattr(config, 'latent_window', 0) or 0), 'max_model_len': vllm_config.model_config.max_model_len,
               'max_num_batched_tokens': vllm_config.scheduler_config.max_num_batched_tokens}}), flush=True)
 
     def finish_loading(self) -> None:
@@ -240,7 +260,8 @@ class OuroModel(nn.Module):
         if not self._geometry_checked:
             self._check_geometry(md, splits)
         ctx = s6_layer.StepContext(positions, md.query_start_loc, md.seq_lens, md.max_query_len, T, tables, self.scale,
-                                   self.backends, self.workspace, splits, self.rope_flat)
+                                   self.backends, self.workspace, splits, self.rope_flat, self.layers[0].self_attn.window,
+                                   self.max_model_len)
         ctx.history_needed = history_needed(ctx)
         return ctx
 

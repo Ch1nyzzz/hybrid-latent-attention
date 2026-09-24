@@ -16,5 +16,7 @@ adapter (`vllm_latent/ouro_latent.py`, TRITON_ATTN, FULL_DECODE_ONLY CUDA graphs
 Do not silently fall back to HF/PyTorch generation. Keep HF engines for teacher
 scoring, differentiable training replay, and explicitly named numerical reference
 tests. OPD must acknowledge current S6 weights before generation, disable prefix
-caching/chunked prefill, fit the worst-case batch in KV capacity, and check sampled
+caching/chunked prefill and async scheduling (an EOS-finished request is otherwise
+scheduled one extra token, breaking exported cache/trajectory length alignment),
+fit the worst-case batch in KV capacity, and check sampled
 log-probs against replay before applying an update.

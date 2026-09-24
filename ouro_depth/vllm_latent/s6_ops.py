@@ -10,6 +10,7 @@ The step-invariant masks (``invalid = ~valid``, ``empty = ctx == 0``) are comput
 """
 from __future__ import annotations
 from collections import namedtuple
+import os
 from functools import cache
 import torch
 from ouro_depth.latent.register import rotate_half
@@ -152,11 +153,52 @@ def history_attention_kv(q, k, v, block_table, ctx, scale, num_kv_splits, worksp
     if mla:  # the grouped kernel's IS_MLA path (BLOCK_DMODEL = Lv, BLOCK_DPE = Lk - Lv), also for kv_group_num == 1
         decode_attention_fwd_grouped(q, kb, vb, o, lse, block_table, ctx, logits, num_kv_splits, scale,
                                      page_size=k.shape[2], k_scale=k_scale, v_scale=v_scale, is_mla=True)
-    else:
+    elif not _wide_grouped_decode(q, kb, vb, o, lse, block_table, ctx, logits, num_kv_splits, scale,
+                                  k.shape[2], k_scale, v_scale):
         decode_attention_fwd(q, kb, vb, o, lse, block_table, ctx, logits, num_kv_splits, scale,
                              page_size=k.shape[2], k_scale=k_scale, v_scale=v_scale)
     # Stage 2 leaves NaN / -inf on empty rows; NaN * 0 in the merge would keep it, so o is zeroed too.
     return o.masked_fill_(empty[:, None, None], 0), lse.masked_fill_(empty[:, None], -INF).t().contiguous()
+
+
+WIDE_DECODE_STAGES = int(os.environ.get('S6_WIDE_DECODE_STAGES', '2'))  # 0: always vLLM's own launcher
+_WIDE_FAILED = set()
+
+
+def _wide_grouped_decode(q, kb, vb, o, lse, block_table, ctx, logits, num_kv_splits, scale, page_size, k_scale, v_scale):
+    """vLLM 0.26's grouped stage-1 kernel with software pipelining kept on for ``BLOCK_DMODEL >= 1024``.
+
+    vLLM forces ``num_stages = 1`` there to fit a 99 KiB shared-memory budget; on A100 (164 KiB) that serializes
+    every K/V tile load and makes width-1024 history attention ~3x slower. Same kernel, arguments and stage-2
+    reduce as ``_decode_grouped_att_m_fwd`` (non-MLA path): only the pipeline depth differs, so outputs are
+    bitwise identical. Returns False (caller uses vLLM's launcher) below width 1024, for MHA, when disabled, or
+    after a compile failure on this device.
+    """
+    import triton
+    from triton.runtime.errors import OutOfResources
+    from vllm.v1.attention.ops import triton_decode_attention as tda
+    T, H, Lk = q.shape
+    Lv, kv_heads = vb.shape[-1], vb.shape[-2]
+    block_dmodel = triton.next_power_of_2(Lk)
+    key = (str(q.device), block_dmodel, triton.next_power_of_2(Lv))
+    if WIDE_DECODE_STAGES < 2 or block_dmodel < 1024 or H == kv_heads or key in _WIDE_FAILED:
+        return False
+    group = H // kv_heads
+    ones = lambda s: torch.tensor(1.0, dtype=torch.float32, device=q.device) if s is None else s
+    try:
+        tda._fwd_grouped_kernel_stage1[(T, triton.cdiv(H, min(16, group)), num_kv_splits)](
+            q, kb, vb, scale, block_table, ctx, logits, block_table.stride(0), q.stride(0), q.stride(1),
+            tda._page_stride(kb, page_size), kb.stride(-3), kb.stride(-2),
+            tda._page_stride(vb, page_size), vb.stride(-3), vb.stride(-2),
+            logits.stride(0), logits.stride(1), logits.stride(2), ones(k_scale), ones(v_scale),
+            kv_group_num=group, q_head_num=H, BLOCK_DMODEL=block_dmodel, BLOCK_DPE=0,
+            BLOCK_DV=triton.next_power_of_2(Lv), BLOCK_N=32, BLOCK_H=16, NUM_KV_SPLITS=num_kv_splits,
+            PAGE_SIZE=page_size, logit_cap=0.0, num_warps=4, num_stages=WIDE_DECODE_STAGES, Lk=Lk, Lv=Lv, IS_MLA=False)
+    except OutOfResources:
+        _WIDE_FAILED.add(key)
+        return False
+    tda._decode_softmax_reducev_fwd(logits, q, o, lse, vb, ctx, num_kv_splits)
+    return True
 
 
 def _history_reference(q, k, v, block_table, ctx, empty, scale):
@@ -240,6 +282,83 @@ def _merge_reference(o_hist, lse_hist, o_chunk, lse_chunk):
     w_hist, w_chunk = (torch.where(total > 0, w / total, 0.0) for w in (w_hist, w_chunk))  # both empty -> 0
     out = o_hist.float() * w_hist.t()[..., None] + o_chunk.float() * w_chunk.t()[..., None]
     return out.to(o_chunk.dtype).contiguous()
+
+
+WINDOW_ROWS = 128  # query rows per window gather: bounds the [rows, W, H, 2d] transient on mixed prefill steps
+
+
+def window_attention(q, cache, block_table, ctx, window, scale):
+    """Exact attention of ``q[T,H,d]`` (roped) over history rows ``[ctx[t] - window, ctx[t])`` of a paged exact cache.
+
+    ``cache`` is the TRITON_ATTN logical layout ``[num_blocks, H, block, 2d]`` (K then V), ``block_table[T, max_blocks]``
+    per token, ``ctx[T]`` the history length. Static shapes only (graph-safe). Returns ``(o[T,H,d], lse[H,T] fp32)``;
+    rows without window history give ``o = 0``, ``lse = -inf``.
+    """
+    T, H, d = q.shape
+    block = cache.shape[2]
+    outs, lses = [], []
+    offsets = torch.arange(window, device=q.device) - window
+    for s in range(0, T, WINDOW_ROWS):
+        e = min(s + WINDOW_ROWS, T)
+        pos = ctx[s:e, None].long() + offsets                                     # [t, W]
+        valid = pos >= 0
+        pos = pos.clamp(min=0)
+        blocks = block_table[s:e].long().gather(1, pos // block)
+        rows = cache[blocks, :, pos % block].float()                              # [t, W, H, 2d]
+        scores = torch.einsum('thd,twhd->thw', q[s:e].float(), rows[..., :d]) * scale
+        scores = scores.masked_fill(~valid[:, None, :], -INF)
+        lse = torch.logsumexp(scores, -1)                                         # [t, H]
+        probs = torch.exp(scores - torch.where(torch.isinf(lse), 0., lse)[..., None])
+        outs.append(torch.einsum('thw,twhd->thd', probs, rows[..., d:]).to(q.dtype))
+        lses.append(lse)
+    return torch.cat(outs), torch.cat(lses).t().contiguous()
+
+
+def window_attention_fa(q, cache, block_table, query_start_loc, seq_lens, window, scale, max_seqlen_k, invalid):
+    """Decode-only fused exact window: one FA2 paged call over keys ``[seq_len - 1 - window, seq_len - 1]`` (the window
+    history plus the current token, which the caller has already written) of a TRITON_ATTN cache ``[nb, H, block, 2d]``.
+
+    Per-request ``block_table`` / ``seq_lens``; every request has query length 1. Replaces ``chunk_attention`` +
+    ``window_attention`` + ``merge_lse``. Returns ``(o[T,H,d], lse[H,T] fp32)``; ``invalid`` rows get ``lse = -inf``.
+    """
+    varlen, version = _flash_attention(q.shape[-1])
+    d = q.shape[-1]
+    kv = cache.transpose(1, 2)  # physical (nb, block, H, 2d)
+    o, lse = varlen(q=q, k=kv[..., :d], v=kv[..., d:], max_seqlen_q=1, cu_seqlens_q=query_start_loc,
+                    max_seqlen_k=max_seqlen_k, seqused_k=seq_lens, softmax_scale=scale, causal=True,
+                    window_size=[window, 0], block_table=block_table, return_softmax_lse=True, num_splits=1,
+                    fa_version=version)
+    return o, lse.float().masked_fill_(invalid[None, :], -INF).contiguous()
+
+
+def window_history_fa(q, cache, token_block_table, ctx, window, scale, max_seqlen_k, empty):
+    """Exact window over history keys only (non-decode steps): token ``t`` reads rows ``[ctx[t] - window, ctx[t])``.
+
+    Each token is its own length-1 FA2 query (``cu_seqlens_q = arange(T + 1)``, per-token ``token_block_table`` and
+    ``seqused_k = ctx``), so the bottom-right aligned ``window_size = (window - 1, 0)`` is exactly that range. Paged
+    FA2 with ``max_seqlen_q > 1`` writes its lse past the ``[H, total_q]`` buffer, hence the per-token form. FA2's
+    early exit for an empty key range writes ``+inf`` lse at padded-layout offsets, clobbering other tokens' lse, so
+    ``seqused_k`` is clamped to 1 and rows without history (``empty``: prefill tokens, padding) are masked to ``-inf``.
+    """
+    varlen, version = _flash_attention(q.shape[-1])
+    T, d = q.shape[0], q.shape[-1]
+    kv = cache.transpose(1, 2)
+    cu = torch.arange(T + 1, dtype=torch.int32, device=q.device)
+    o, lse = varlen(q=q, k=kv[..., :d], v=kv[..., d:], max_seqlen_q=1, cu_seqlens_q=cu, max_seqlen_k=max_seqlen_k,
+                    seqused_k=ctx.clamp(min=1), softmax_scale=scale, causal=True, window_size=[window - 1, 0],
+                    block_table=token_block_table, return_softmax_lse=True, num_splits=1, fa_version=version)
+    return o, lse.float().masked_fill_(empty[None, :], -INF).contiguous()
+
+
+def merge_lse(o1, lse1, o2, lse2):
+    """LSE merge that also returns the merged lse (``[T,H,d]`` outputs, ``[H,T]`` lse); both empty -> 0, -inf."""
+    peak = torch.maximum(lse1, lse2)
+    peak = torch.where(torch.isinf(peak), torch.zeros_like(peak), peak)
+    w1, w2 = torch.exp(lse1 - peak), torch.exp(lse2 - peak)
+    total = w1 + w2
+    w1, w2 = (torch.where(total > 0, w / total, 0.).t()[..., None] for w in (w1, w2))
+    out = torch.nan_to_num(o1.float()) * w1 + torch.nan_to_num(o2.float()) * w2  # FA leaves invalid rows as scratch
+    return out.to(o1.dtype), peak + torch.log(total)
 
 
 def select_backends(head_size=128):

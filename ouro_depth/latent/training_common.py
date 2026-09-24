@@ -9,11 +9,14 @@ import torch.distributed as dist
 
 SEMANTICS = "s6-block-window-replay-v1"
 FULL_PARAMETER_SEMANTICS = "s6-fullparam-opd-v1"
+BASE_SFT_SEMANTICS = "ouro-base-sft-v1"
 
 
 def trainable_parameters(*modules):
     result, seen = [], set()
     for module in modules:
+        if module is None:
+            continue
         for p in module.parameters():
             if p.requires_grad and id(p) not in seen:
                 result.append(p)
@@ -74,6 +77,8 @@ def synchronize_gradients(*modules, return_metrics=False):
     unused writer during all-exact attention or the detach control.
     """
     params = trainable_parameters(*modules)
+    if not params:
+        return 0.0
     if distributed():
         active = torch.tensor([p.grad is not None for p in params], device=params[0].device,
                               dtype=torch.int32)
@@ -106,21 +111,33 @@ def restore_rng(state):
     if torch.cuda.is_available():
         torch.cuda.set_rng_state_all(state["cuda"])
 
-def restore_checkpoint(path, student, optimizer, metadata, rank, *, backbone=None):
+def restore_checkpoint(path, student=None, optimizer=None, metadata=None, rank=0, *, backbone=None, base_model=None):
     path = Path(path)
     checkpoint = torch.load(path / "training.pt" if path.is_dir() else path,
                             map_location="cpu", weights_only=False)
-    semantics = FULL_PARAMETER_SEMANTICS if backbone is not None else SEMANTICS
-    if checkpoint["semantics"] != semantics or checkpoint["cfg"] != student.cfg:
-        raise ValueError("Checkpoint execution/architecture mismatch")
-    if checkpoint["metadata"] != metadata:
-        raise ValueError("Checkpoint recipe/data/distribution mismatch")
-    if ('backbone' in checkpoint) != (backbone is not None):
-        raise ValueError('Backbone payload/restore mode mismatch')
-    if backbone is not None:
-        backbone.load_state_dict(checkpoint['backbone'], strict=True)
-    student.load_state_dict(checkpoint["student"])
-    optimizer.load_state_dict(checkpoint["optimizer"])
+    target_semantics = checkpoint.get("semantics")
+    if base_model is not None:
+        if target_semantics != BASE_SFT_SEMANTICS:
+            raise ValueError(f"Expected base semantics {BASE_SFT_SEMANTICS}, got {target_semantics}")
+        base_model.load_state_dict(checkpoint["base_model"], strict=True)
+    else:
+        semantics = FULL_PARAMETER_SEMANTICS if backbone is not None else SEMANTICS
+        if target_semantics not in (semantics, FULL_PARAMETER_SEMANTICS, SEMANTICS) or checkpoint.get("cfg") != student.cfg:
+            raise ValueError("Checkpoint execution/architecture mismatch")
+        if ('backbone' in checkpoint) != (backbone is not None):
+            raise ValueError('Backbone payload/restore mode mismatch')
+        if backbone is not None:
+            backbone.load_state_dict(checkpoint['backbone'], strict=True)
+        student.load_state_dict(checkpoint["student"])
+    if metadata is not None:
+        ckpt_meta = dict(checkpoint.get("metadata") or {})
+        target_meta = dict(metadata)
+        if ckpt_meta.get("steps") != target_meta.get("steps") and target_meta.get("steps", 0) >= ckpt_meta.get("steps", 0):
+            ckpt_meta["steps"] = target_meta["steps"]
+        if ckpt_meta != target_meta:
+            raise ValueError("Checkpoint recipe/data/distribution mismatch")
+    if optimizer is not None:
+        optimizer.load_state_dict(checkpoint["optimizer"])
     restore_rng(checkpoint["rng_by_rank"][rank])
     return checkpoint["completed_steps"]
 
@@ -148,7 +165,7 @@ class TeacherTargets:
 def make_optimizer(student, lr_reader=1e-4, lr_writer=5e-5):
     readers, writers = [], []
     for name, parameter in student.named_parameters():
-        (writers if '.cand_s.' in name or '.cand1.' in name else readers).append(parameter)
+        (writers if '.cand_s.' in name or '.cand1.' in name or '.inter_s.' in name else readers).append(parameter)
     return torch.optim.AdamW([dict(params=readers, lr=lr_reader, role='reader'),
                               dict(params=writers, lr=lr_writer, role='writer')],
                              betas=(.9,.95), weight_decay=.01)
@@ -167,48 +184,71 @@ def setup_runtime(seed):
 
 def broadcast_student(*modules):
     if distributed():
-        for p in trainable_parameters(*modules):dist.broadcast(p.data,src=0)
+        for p in trainable_parameters(*modules):
+            dist.broadcast(p.data, src=0)
 
 
-def atomic_checkpoint(output, student, optimizer, completed, metadata, *, progress=None, backbone=None):
+def atomic_checkpoint(output, student=None, optimizer=None, completed=0, metadata=None, *, progress=None, backbone=None, base_model=None):
     rank = dist.get_rank() if distributed() else 0
     states = [None] * (dist.get_world_size() if distributed() else 1)
-    if distributed():dist.all_gather_object(states,rng_state())
-    else:states[0]=rng_state()
-    semantics = FULL_PARAMETER_SEMANTICS if backbone is not None else SEMANTICS
-    output=Path(output)
-    destination=output / f'checkpoint-{completed:06d}'
-    if rank==0:
-        if destination.exists():raise FileExistsError(destination)
-        temporary=output / f'.writing-{completed:06d}'
-        temporary.mkdir(parents=True,exist_ok=True)
-        payload=dict(student=student.state_dict(),cfg=student.cfg,optimizer=optimizer.state_dict(),
-                     completed_steps=completed,rng_by_rank=states,metadata=metadata,semantics=semantics)
-        if backbone is not None:payload['backbone']=backbone.state_dict()
-        if progress is not None:payload['progress']=progress
-        torch.save(payload,temporary/'training.pt')
-        (temporary/'complete.json').write_text(json.dumps(dict(completed_steps=completed,semantics=semantics)))
-        temporary.rename(destination)
-        name = f'opd_student-{completed}.pt' if backbone is not None else f'student-{completed}.pt'
-        export=output / ('.' + name)
-        package=dict(student=student.state_dict(),cfg=student.cfg,step=completed,
-                     metadata=metadata,semantics=semantics)
-        if backbone is not None:package['backbone']=backbone.state_dict()
-        torch.save(package,export)
-        export.rename(output / name)
-    if distributed():dist.barrier()
+    if distributed():
+        dist.all_gather_object(states, rng_state())
+    else:
+        states[0] = rng_state()
+    output = Path(output)
+    destination = output / f'checkpoint-{completed:06d}'
+    if rank == 0:
+        if destination.exists():
+            raise FileExistsError(destination)
+        temporary = output / f'.writing-{completed:06d}'
+        temporary.mkdir(parents=True, exist_ok=True)
+        if base_model is not None:
+            semantics = BASE_SFT_SEMANTICS
+            payload = dict(base_model=base_model.state_dict(), optimizer=optimizer.state_dict() if optimizer else {},
+                           completed_steps=completed, rng_by_rank=states, metadata=metadata or {}, semantics=semantics)
+            if progress is not None:
+                payload['progress'] = progress
+            torch.save(payload, temporary / 'training.pt')
+            (temporary / 'complete.json').write_text(json.dumps(dict(completed_steps=completed, semantics=semantics)))
+            temporary.rename(destination)
+            name = f'base_model-{completed}.pt'
+            export = output / ('.' + name)
+            torch.save(dict(base_model=base_model.state_dict(), step=completed, metadata=metadata or {}, semantics=semantics), export)
+            export.rename(output / name)
+        else:
+            semantics = FULL_PARAMETER_SEMANTICS if backbone is not None else SEMANTICS
+            payload = dict(student=student.state_dict() if student else {}, cfg=student.cfg if student else {},
+                           optimizer=optimizer.state_dict() if optimizer else {},
+                           completed_steps=completed, rng_by_rank=states, metadata=metadata or {}, semantics=semantics)
+            if backbone is not None:
+                payload['backbone'] = backbone.state_dict()
+            if progress is not None:
+                payload['progress'] = progress
+            torch.save(payload, temporary / 'training.pt')
+            (temporary / 'complete.json').write_text(json.dumps(dict(completed_steps=completed, semantics=semantics)))
+            temporary.rename(destination)
+            name = f'opd_student-{completed}.pt' if backbone is not None else f'student-{completed}.pt'
+            export = output / ('.' + name)
+            package = dict(student=student.state_dict() if student else {}, cfg=student.cfg if student else {},
+                           step=completed, metadata=metadata or {}, semantics=semantics)
+            if backbone is not None:
+                package['backbone'] = backbone.state_dict()
+            torch.save(package, export)
+            export.rename(output / name)
+    if distributed():
+        dist.barrier()
     return destination
 
 
 def load_export(path, device='cpu', *, allow_full_parameter=False):
     from .register import LatentStudent
-    payload=torch.load(path,map_location='cpu',weights_only=False)
+    payload = torch.load(path, map_location='cpu', weights_only=False)
     allowed = {SEMANTICS, FULL_PARAMETER_SEMANTICS} if allow_full_parameter else {SEMANTICS}
     if payload.get('semantics') not in allowed:
-        raise ValueError('Only compatible S6 exports can initialize the next stage')
+        raise ValueError(f"Only compatible S6 exports can initialize the next stage, got {payload.get('semantics')}")
     if ('backbone' in payload) != (payload.get('semantics') == FULL_PARAMETER_SEMANTICS):
         raise ValueError('Export semantics/backbone mismatch')
-    return LatentStudent.from_checkpoint(payload,device),payload
+    return LatentStudent.from_checkpoint(payload, device), payload
 
 
 def example_groups(records, micro_batch, *, group_by='legacy'):

@@ -4,8 +4,12 @@ import re
 
 def validate_stage1_dataset(payload, target_manifest, expected_source=None):
     meta = payload.get('metadata', {})
-    if meta.get('stage') != 1 or payload.get('step') != meta.get('steps'):
-        raise ValueError('Direct decode training requires a completed Stage1 export')
+    # Stage1 exports record ``step``; archived training.pt records ``completed_steps``.
+    # Any completed interval checkpoint (e.g. the best MATH500 one) may seed OPD.
+    step = payload.get('step', payload.get('completed_steps'))
+    if meta.get('stage') != 1 or type(step) is not int or type(meta.get('steps')) is not int \
+            or not 1 <= step <= meta['steps']:
+        raise ValueError('Direct decode training requires a completed Stage1 checkpoint')
     source = meta.get('data_manifest_sha256')
     for digest in (source, target_manifest):
         if not isinstance(digest, str) or re.fullmatch(r'[0-9a-f]{64}', digest) is None:

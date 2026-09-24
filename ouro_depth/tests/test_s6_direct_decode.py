@@ -133,7 +133,7 @@ def test_verl_pg_teacher_direction_mask_and_window_normalization():
     torch.testing.assert_close(fn(current,old[:,:2],teacher[:,:2],mask[:,:2],3),expected)
 
 
-@pytest.mark.parametrize('mode', ['opd'])
+@pytest.mark.parametrize('mode', ['stage3','opd'])
 @pytest.mark.parametrize('microbatch', [1,2])
 def test_direct_entrypoint_resume_matches_uninterrupted(tmp_path,mode,microbatch):
     if mode == 'opd':opd_loss()
@@ -167,10 +167,17 @@ def test_direct_entrypoint_resume_matches_uninterrupted(tmp_path,mode,microbatch
 
 def test_reject_partial_stage1_and_inconsistent_prefill(tmp_path):
     _,_,data,stage1=make_inputs(tmp_path)
-    payload=torch.load(stage1,weights_only=False);payload['step']=1
-    with pytest.raises(ValueError,match='completed Stage1'):
-        trainer.initial_stage1(payload,payload['metadata']['data_manifest_sha256'])
-    base=['--mode','opd','--model-path','m','--data-dir',str(data),'--output-dir','o','--stage1-student',str(stage1)]
+    payload=torch.load(stage1,weights_only=False);manifest=payload['metadata']['data_manifest_sha256']
+    steps=payload['metadata']['steps']
+    # Any completed interval checkpoint may seed OPD, via export ``step`` or archived ``completed_steps``.
+    trainer.initial_stage1(dict(payload,step=1),manifest)
+    archived={k:v for k,v in payload.items() if k!='step'};archived['completed_steps']=steps
+    trainer.initial_stage1(archived,manifest)
+    for bad in (dict(payload,step=steps+1),dict(payload,step=0),{k:v for k,v in payload.items() if k!='step'},
+                dict(payload,metadata=dict(payload['metadata'],stage=3))):
+        with pytest.raises(ValueError,match='completed Stage1'):
+            trainer.initial_stage1(bad,manifest)
+    base=['--mode','stage3','--model-path','m','--data-dir',str(data),'--output-dir','o','--stage1-student',str(stage1)]
     with pytest.raises(SystemExit):trainer.parse(base+['--prompt-chunk-size','256'])
     assert trainer.parse(base).prompt_chunk_size == 0
 
@@ -191,7 +198,7 @@ def _distributed_direct_rank(rank, rendezvous):
     dist.init_process_group('gloo',init_method=Path(rendezvous).as_uri(),rank=rank,world_size=2,
                             timeout=timedelta(seconds=60))
     try:
-        for mode in ('opd',):
+        for mode in ('stage3','opd'):
             student.zero_grad(set_to_none=True);reference.zero_grad(set_to_none=True)
             def backward(st,trajectory):
                 if mode=='opd':
@@ -226,7 +233,7 @@ def _distributed_entrypoint_rank(rank, root):
     import torch.distributed as dist
     root=Path(root)
     model,_,teacher,_=fixture();teacher.remove_hooks()
-    for mode in ('opd',):
+    for mode in ('stage3','opd'):
         dist.init_process_group('gloo',init_method=(root/f'init-{mode}').as_uri(),rank=rank,world_size=2,
                                 timeout=timedelta(seconds=60))
         args=['--mode',mode,'--model-path','tiny','--data-dir',str(root/'data'),
@@ -246,7 +253,7 @@ def test_direct_two_rank_entrypoints(tmp_path):
     if not dist.is_gloo_available():pytest.skip('Gloo unavailable')
     make_inputs(tmp_path)
     mp.spawn(_distributed_entrypoint_rank,args=(str(tmp_path),),nprocs=2,join=True)
-    for mode in ('opd',):
+    for mode in ('stage3','opd'):
         state=torch.load(tmp_path/mode/'checkpoint-000002/training.pt',weights_only=False)
         assert len(state['rng_by_rank'])==2 and state['progress']['supervised_tokens']>0
         logs=[[json.loads(x) for x in (tmp_path/mode/f'rank-{r}.jsonl').read_text().splitlines()] for r in range(2)]

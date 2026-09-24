@@ -77,6 +77,9 @@ def test_stage1_all_writers_receive_gradients():
     layer_losses(student.layers[0],teacher,0,backward=True)
     for linear in [*student.layers[0].cand_s,student.layers[0].cand1]:
         assert linear.weight.grad.norm()>0
+    for block in student.layers[0].inter_s:
+        for p in block.parameters():
+            assert p.grad is not None and p.grad.norm()>0
 
 
 @pytest.mark.parametrize('checked',[False,True])

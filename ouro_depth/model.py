@@ -239,6 +239,8 @@ def load_model(
     model_path = str(model_path)
     config = OuroConfig.from_pretrained(model_path, local_files_only=True)
     config._attn_implementation = "sdpa"
+    if getattr(config, "pad_token_id", None) is None:
+        config.pad_token_id = -1
     base = OuroForCausalLM.from_pretrained(
         model_path,
         config=config,
